@@ -3,7 +3,7 @@
 Fast, local-first desktop client for any OpenAI-compatible API.
 
 Chat completions use the configured chat model; thread titles use the title model and fall back to
-the chat model when no title model is set.
+the chat model when it is unset or returns no title.
 
 ## Features
 

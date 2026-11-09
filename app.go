@@ -29,7 +29,7 @@ const (
 	defaultTopP            = 1.0
 	defaultMaxTokens       = 2048
 	titleTemperature       = 0.2
-	titleMaxTokens         = 32
+	titleMaxTokens         = 512
 	titleTimeout           = 30 * time.Second
 	titlePrompt            = "Generate a short title for this conversation. Reply with only the title: 3 to 6 words, no quotes, no trailing punctuation."
 	maxAttachments         = 10
@@ -657,7 +657,7 @@ func toAIMessage(m db.Message) ai.Message {
 }
 
 // generateTitle asks the title model for a short thread title and falls back to
-// the first user message when the request fails.
+// the chat model, then to the first user message, when no title is produced.
 func (a *App) generateTitle(client *ai.Client, cfg config.Config, fallbackModel, content string) string {
 	if strings.TrimSpace(content) == "" {
 		return defaultThreadTitle
@@ -673,6 +673,16 @@ func (a *App) generateTitle(client *ai.Client, cfg config.Config, fallbackModel,
 		return titleFromContent(content)
 	}
 
+	generated := a.streamTitle(client, model, content)
+	if strings.TrimSpace(generated) == "" && fallbackModel != "" && fallbackModel != model {
+		// Reasoning models can spend the whole budget on hidden reasoning and
+		// return no content; retry with the chat model before giving up.
+		generated = a.streamTitle(client, fallbackModel, content)
+	}
+	return normalizeTitle(generated, content)
+}
+
+func (a *App) streamTitle(client *ai.Client, model, content string) string {
 	temperature := titleTemperature
 	maxTokens := titleMaxTokens
 	ctx, cancel := context.WithTimeout(a.ctx, titleTimeout)
@@ -690,10 +700,10 @@ func (a *App) generateTitle(client *ai.Client, cfg config.Config, fallbackModel,
 		generated.WriteString(token)
 	})
 	if err != nil {
-		log.Printf("app: generate title: %v", err)
-		return titleFromContent(content)
+		log.Printf("app: generate title with %s: %v", model, err)
+		return ""
 	}
-	return normalizeTitle(generated.String(), content)
+	return generated.String()
 }
 
 func normalizeTitle(raw, content string) string {
