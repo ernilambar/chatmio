@@ -2,6 +2,9 @@
 
 Fast, local-first desktop client for any OpenAI-compatible API.
 
+Chat completions use the configured chat model; thread titles use the title model and fall back to
+the chat model when no title model is set.
+
 ## Stack
 
 - Wails v2 (Go + native WebView)
@@ -22,14 +25,19 @@ frontend/src/App.svelte          shell layout
 frontend/src/lib/components      UI components
 frontend/src/lib/stores          runes-based state
 frontend/src/lib/wailsjs         generated Go bindings
-scripts/build-app.sh             build the arm64 .app and release zip
+scripts/bundle.sh                quality gate, arm64 .app, zip and SHA256SUMS
+scripts/dev.sh                   build and install the bundle to /Applications
 scripts/release.sh               tag and push a release
+.github/workflows/ci.yml         quality gate
 .github/workflows/release.yml    build and publish the GitHub release
 ```
 
+App identity (display name, version and copyright) lives in `wails.json` under `info`; the bundle
+identifier is set in `build/darwin/Info.plist`.
+
 ## Storage
 
-- `config.json` in the OS app data directory: base URL, model, system prompt, API key.
+- `config.json` in the OS app data directory: base URL, chat model, title model, system prompt, API key.
 - `chats.db` in the same directory: threads and messages.
 
 API keys are stored in plain text in `config.json` for now. OS keychain support is planned.
@@ -40,19 +48,34 @@ API keys are stored in plain text in `config.json` for now. OS keychain support 
 wails dev
 ```
 
+To test the installed bundle (Dock icon, app menu, LaunchServices registration):
+
+```sh
+scripts/dev.sh             # debug build
+scripts/dev.sh --release   # publishable build, same as scripts/bundle.sh
+```
+
 ## Build
 
 ```sh
-scripts/build-app.sh
+scripts/bundle.sh
 ```
 
-Produces `build/bin/chattu.app` and `dist/chattu-<version>-darwin-arm64.zip`.
+Runs the quality gate, regenerates and checks the Wails bindings, builds the arm64 bundle and
+produces:
+
+- `dist/Chattu.app`
+- `dist/Chattu-macos-arm64.zip`
+- `dist/SHA256SUMS`
 
 ## Release
+
+Bump `info.productVersion` in `wails.json`, commit it, then:
 
 ```sh
 scripts/release.sh v0.1.0
 ```
 
-Builds locally, creates the tag and pushes it. GitHub Actions then builds on an arm64 runner and
-publishes the zip as a GitHub release.
+The tag must match `wails.json`; the script builds locally, verifies the tree is still clean,
+creates the tag and pushes it. GitHub Actions then builds on an arm64 runner and publishes the zip
+and checksum as a GitHub release.

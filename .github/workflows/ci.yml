@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Quality gate
+    runs-on: macos-15
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Wails
+        run: go install "github.com/wailsapp/wails/v2/cmd/wails@$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2)"
+
+      - name: Frontend build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Check generated bindings
+        run: |
+          "$(go env GOPATH)/bin/wails" generate module
+          find frontend/src/lib/wailsjs -type f -exec chmod 644 {} +
+          if [ -n "$(git status --porcelain -- frontend/src/lib/wailsjs)" ]; then
+            echo "wails bindings are out of date:" >&2
+            git status --short -- frontend/src/lib/wailsjs >&2
+            exit 1
+          fi
+
+      - name: Frontend check
+        working-directory: frontend
+        run: npm run check
+
+      - name: Go quality gate
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt-formatted:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
+          go vet ./...
+          go test ./...
+          go build -o /dev/null .

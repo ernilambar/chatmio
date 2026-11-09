@@ -23,6 +23,9 @@ const (
 	defaultTemperature = 0.7
 	defaultTopP        = 1.0
 	defaultMaxTokens   = 2048
+	titleTemperature   = 0.2
+	titleMaxTokens     = 32
+	titlePrompt        = "Generate a short title for this conversation. Reply with only the title: 3 to 6 words, no quotes, no trailing punctuation."
 )
 
 // App is the backend bridge exposed to the frontend.
@@ -85,8 +88,8 @@ func (a *App) SaveConfig(cfg config.Config) error {
 	if strings.TrimSpace(cfg.BaseURL) == "" {
 		return errors.New("base URL is required")
 	}
-	if strings.TrimSpace(cfg.Model) == "" {
-		return errors.New("model is required")
+	if strings.TrimSpace(cfg.ChatModel) == "" {
+		return errors.New("chat model is required")
 	}
 	return a.config.Save(cfg)
 }
@@ -159,8 +162,8 @@ func (a *App) SendMessage(threadID, content string) error {
 	if cfg.BaseURL == "" {
 		return errors.New("set a base URL in settings")
 	}
-	if cfg.Model == "" {
-		return errors.New("set a model in settings")
+	if cfg.ChatModel == "" {
+		return errors.New("set a chat model in settings")
 	}
 
 	now := time.Now().UnixMilli()
@@ -191,18 +194,12 @@ func (a *App) SendMessage(threadID, content string) error {
 		prompt = append(prompt, ai.Message{Role: ai.Role(m.Role), Content: m.Content})
 	}
 
-	title := thread.Title
-	if title == "" || title == defaultThreadTitle {
-		title = titleFromContent(content)
-		if err := a.store.UpdateThreadMeta(threadID, title, now); err != nil {
-			return err
-		}
-	}
+	needsTitle := thread.Title == "" || thread.Title == defaultThreadTitle
 
 	client := ai.New(cfg.BaseURL, cfg.APIKey, nil)
 	var reply strings.Builder
 	err = client.StreamChat(a.ctx, ai.ChatOptions{
-		Model:            cfg.Model,
+		Model:            cfg.ChatModel,
 		Messages:         prompt,
 		Temperature:      &thread.Temperature,
 		TopP:             &thread.TopP,
@@ -229,6 +226,10 @@ func (a *App) SendMessage(threadID, content string) error {
 	if err := a.store.AddMessage(assistantMessage); err != nil {
 		return err
 	}
+	title := thread.Title
+	if needsTitle {
+		title = a.generateTitle(client, cfg, content)
+	}
 	if err := a.store.UpdateThreadMeta(threadID, title, time.Now().UnixMilli()); err != nil {
 		return err
 	}
@@ -250,14 +251,62 @@ type chatDone struct {
 	Message  db.Message `json:"message"`
 }
 
+// generateTitle asks the title model for a short thread title and falls back to
+// the first user message when the request fails.
+func (a *App) generateTitle(client *ai.Client, cfg config.Config, content string) string {
+	model := cfg.TitleModel
+	if model == "" {
+		model = cfg.ChatModel
+	}
+	if model == "" {
+		return titleFromContent(content)
+	}
+
+	temperature := titleTemperature
+	maxTokens := titleMaxTokens
+	var generated strings.Builder
+	err := client.StreamChat(a.ctx, ai.ChatOptions{
+		Model: model,
+		Messages: []ai.Message{
+			{Role: ai.RoleSystem, Content: titlePrompt},
+			{Role: ai.RoleUser, Content: content},
+		},
+		Temperature: &temperature,
+		MaxTokens:   &maxTokens,
+	}, func(token string) {
+		generated.WriteString(token)
+	})
+	if err != nil {
+		log.Printf("app: generate title: %v", err)
+		return titleFromContent(content)
+	}
+	return normalizeTitle(generated.String(), content)
+}
+
+func normalizeTitle(raw, content string) string {
+	title := strings.TrimSpace(raw)
+	title = strings.TrimSpace(strings.TrimPrefix(title, "Title:"))
+	title = strings.TrimSpace(strings.Trim(title, "\"'`*"))
+	title = strings.Join(strings.Fields(title), " ")
+	title = strings.TrimRight(title, ".!?,;:")
+	if title == "" {
+		return titleFromContent(content)
+	}
+	return truncateRunes(title, 60)
+}
+
 func titleFromContent(content string) string {
 	title := strings.Join(strings.Fields(content), " ")
-	runes := []rune(title)
-	if len(runes) > 60 {
-		return string(runes[:60]) + "…"
-	}
 	if title == "" {
 		return defaultThreadTitle
 	}
-	return title
+	return truncateRunes(title, 60)
+}
+
+func truncateRunes(s string, limit int) string {
+	runes := []rune(s)
+	if len(runes) > limit {
+		return string(runes[:limit]) + "…"
+	}
+	return s
 }

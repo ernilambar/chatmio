@@ -3,7 +3,8 @@ export namespace config {
 	export class Config {
 	    baseUrl: string;
 	    apiKey: string;
-	    model: string;
+	    chatModel: string;
+	    titleModel: string;
 	    systemPrompt: string;
 	
 	    static createFrom(source: any = {}) {
@@ -14,7 +15,8 @@ export namespace config {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.baseUrl = source["baseUrl"];
 	        this.apiKey = source["apiKey"];
-	        this.model = source["model"];
+	        this.chatModel = source["chatModel"];
+	        this.titleModel = source["titleModel"];
 	        this.systemPrompt = source["systemPrompt"];
 	    }
 	}

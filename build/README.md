@@ -16,4 +16,5 @@ To return these files to the default state, delete them and build with `wails bu
 - `Info.plist` - main plist used when building with `wails build`.
 - `Info.dev.plist` - same as the main plist but used when building with `wails dev`.
 
-Only arm64 macOS is supported; `scripts/build-app.sh` enforces this.
+Only arm64 macOS is supported; `scripts/bundle.sh` enforces this and produces the publishable
+artifacts under `dist/`.

@@ -16,7 +16,8 @@
 
   let baseUrl = $state('')
   let apiKey = $state('')
-  let model = $state('')
+  let chatModel = $state('')
+  let titleModel = $state('')
   let systemPrompt = $state('')
   let saving = $state(false)
   let error = $state<string | null>(null)
@@ -25,7 +26,8 @@
     if (open && cfg) {
       baseUrl = cfg.baseUrl
       apiKey = cfg.apiKey
-      model = cfg.model
+      chatModel = cfg.chatModel
+      titleModel = cfg.titleModel
       systemPrompt = cfg.systemPrompt
       error = null
     }
@@ -37,7 +39,7 @@
     error = null
     try {
       await onsave(
-        config.Config.createFrom({ baseUrl, apiKey, model, systemPrompt })
+        config.Config.createFrom({ baseUrl, apiKey, chatModel, titleModel, systemPrompt })
       )
       onclose()
     } catch (err) {
@@ -83,13 +85,23 @@
         </label>
 
         <label class="block space-y-1">
-          <span class="text-xs text-muted">Model</span>
+          <span class="text-xs text-muted">Chat model</span>
           <input
-            bind:value={model}
+            bind:value={chatModel}
             class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
             placeholder="gpt-4o-mini"
             required
           />
+        </label>
+
+        <label class="block space-y-1">
+          <span class="text-xs text-muted">Title model</span>
+          <input
+            bind:value={titleModel}
+            class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+            placeholder="Same as chat model"
+          />
+          <span class="text-[11px] text-muted">Leave empty to use the chat model.</span>
         </label>
 
         <label class="block space-y-1">

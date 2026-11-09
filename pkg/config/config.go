@@ -15,8 +15,15 @@ import (
 type Config struct {
 	BaseURL      string `json:"baseUrl"`
 	APIKey       string `json:"apiKey"`
-	Model        string `json:"model"`
+	ChatModel    string `json:"chatModel"`
+	TitleModel   string `json:"titleModel"`
 	SystemPrompt string `json:"systemPrompt"`
+}
+
+// storedConfig decodes config files written before per-task models existed.
+type storedConfig struct {
+	Config
+	LegacyModel string `json:"model"`
 }
 
 // Default returns the configuration used on first launch.
@@ -55,13 +62,23 @@ func (m *Manager) Load() (Config, error) {
 		return Config{}, fmt.Errorf("config: read %s: %w", m.path, err)
 	}
 
-	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	var stored storedConfig
+	if err := json.Unmarshal(data, &stored); err != nil {
 		return Config{}, fmt.Errorf("config: parse %s: %w", m.path, err)
 	}
+	cfg := stored.Config
+	changed := false
 	// Migrate configs written before BaseURL existed (or with a cleared value).
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = Default().BaseURL
+		changed = true
+	}
+	// Migrate the single model setting into the chat model.
+	if cfg.ChatModel == "" && strings.TrimSpace(stored.LegacyModel) != "" {
+		cfg.ChatModel = strings.TrimSpace(stored.LegacyModel)
+		changed = true
+	}
+	if changed {
 		if err := m.Save(cfg); err != nil {
 			return Config{}, err
 		}
@@ -72,7 +89,8 @@ func (m *Manager) Load() (Config, error) {
 // Save writes the config atomically.
 func (m *Manager) Save(cfg Config) error {
 	cfg.BaseURL = strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
-	cfg.Model = strings.TrimSpace(cfg.Model)
+	cfg.ChatModel = strings.TrimSpace(cfg.ChatModel)
+	cfg.TitleModel = strings.TrimSpace(cfg.TitleModel)
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
