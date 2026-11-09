@@ -16,11 +16,14 @@
     SlidersHorizontal,
     Square,
     Trash2,
+    Volume2,
+    VolumeX,
     X
   } from 'lucide-svelte'
-  import { onMount } from 'svelte'
+  import { onDestroy, onMount } from 'svelte'
   import type { db } from '../wailsjs/go/models'
   import { copyText } from '../clipboard'
+  import { speak, speechSupported, stopSpeaking } from '../speech'
   import Markdown from './Markdown.svelte'
   import { formatTokens, splitThinking } from '../reasoning'
   import type { StreamTool } from '../stores/chat.svelte'
@@ -94,6 +97,7 @@
   let confirmingDelete = $state(false)
   let copiedId = $state<string | null>(null)
   let copyTimer: ReturnType<typeof setTimeout> | undefined
+  let speakingId = $state<string | null>(null)
   let editing = $state<db.Message | null>(null)
   let atBottom = $state(true)
 
@@ -142,6 +146,8 @@
       confirmingDelete = false
       editing = null
       atBottom = true
+      stopSpeaking()
+      speakingId = null
       inputEl?.focus()
     }
   })
@@ -149,6 +155,8 @@
   onMount(() => {
     inputEl?.focus()
   })
+
+  onDestroy(stopSpeaking)
 
   $effect(() => {
     if (renaming && renameInput) renameInput.focus()
@@ -290,6 +298,19 @@
     copyTimer = setTimeout(() => {
       copiedId = null
     }, 1500)
+  }
+
+  function toggleSpeech(message: db.Message): void {
+    if (speakingId === message.id) {
+      stopSpeaking()
+      speakingId = null
+      return
+    }
+    const id = message.id
+    speakingId = id
+    speak(messageParts(message).content, () => {
+      if (speakingId === id) speakingId = null
+    })
   }
 
   function formatSize(bytes: number): string {
@@ -510,6 +531,19 @@
                     <Check size={13} />
                   {:else}
                     <Copy size={13} />
+                  {/if}
+                </button>
+              {/if}
+              {#if speechSupported && message.role === 'assistant' && parts.content}
+                <button
+                  class="rounded-md p-1 text-muted transition-colors hover:text-fg"
+                  title={speakingId === message.id ? 'Stop reading' : 'Read aloud'}
+                  onclick={() => toggleSpeech(message)}
+                >
+                  {#if speakingId === message.id}
+                    <VolumeX size={13} />
+                  {:else}
+                    <Volume2 size={13} />
                   {/if}
                 </button>
               {/if}
