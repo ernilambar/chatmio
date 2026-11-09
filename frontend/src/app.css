@@ -157,15 +157,19 @@ body {
 .markdown table {
   display: block;
   max-width: 100%;
+  margin: 0.75rem 0;
   overflow-x: auto;
   border-collapse: collapse;
+  line-height: 1.5;
 }
 
 .markdown th,
 .markdown td {
   border: 1px solid var(--line);
-  padding: 0.25rem 0.5rem;
+  padding: 0.5rem 0.75rem;
   text-align: left;
+  vertical-align: top;
+  overflow-wrap: break-word;
 }
 
 .markdown th {
