@@ -12,7 +12,7 @@
     "productName": "Chattu",
     "productVersion": "0.1.0",
     "copyright": "Copyright © 2026 Nilambar Sharma",
-    "comments": "Local-first desktop client for OpenAI-compatible APIs."
+    "comments": "macOS desktop client for OpenAI-compatible APIs."
   },
   "author": {
     "name": "Nilambar Sharma",
