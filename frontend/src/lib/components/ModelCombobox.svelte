@@ -32,6 +32,9 @@
     value = model
     open = false
     query = ''
+    // Move focus out of the searchable list once a model is picked.
+    const focused = document.activeElement
+    if (focused instanceof HTMLElement && root?.contains(focused)) focused.blur()
   }
 
   function toggle(): void {

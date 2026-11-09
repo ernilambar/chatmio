@@ -7,88 +7,50 @@ the chat model when it is unset or returns no title.
 
 ## Features
 
-- Per-chat model selection, changeable from the chat header.
-- Searchable model picker in settings, populated from the provider's `GET /models`.
+- Per-chat model selection and a searchable model picker populated from the provider's `GET /models`.
+- Streaming replies rendered as GitHub-flavored Markdown, with highlighted code and copy buttons.
 - Image and text-file attachments; unsupported binary files are rejected before sending.
-- Rename and delete chats, copy messages, and automatic titles with a local fallback.
-- Retry a failed turn, regenerate the last reply, and edit any user message in the composer.
-- Animated thinking indicator while a reply streams; generated titles appear in the sidebar.
-- Stop a streaming reply with the stop button or Esc; text received so far is kept.
-- Replies render as GitHub-flavored Markdown with headings, lists, tables, highlighted code blocks with copy buttons, and safe external links.
-- Search chat titles and message contents with ⌘K.
-- Shortcuts: ⌘N new chat, ⌘K search, ⌘L focus the composer, ⌘, settings, Esc stop.
+- Search chats and messages (⌘K), rename or delete chats, and retry, regenerate, or edit messages.
+- Stop a streaming reply with the stop button or Esc; received text is kept.
+- Shortcuts: ⌘N new chat, ⌘K search, ⌘L focus composer, ⌘, settings, Esc stop.
 
-## Stack
+## Requirements
 
-- Wails v2 (Go + native WebView)
-- Svelte 5 + TypeScript + Vite
-- Tailwind CSS 4
+- macOS on Apple silicon (arm64 only)
+- An OpenAI-compatible API endpoint and key
 
-Supported platform: **arm64 macOS only**.
+## Install
 
-## Layout
+Download `Chattu-macos-arm64.zip` from the latest release, then:
 
-```
-main.go              Wails entrypoint and window options
-app.go               IPC bridge exposed to the frontend
-pkg/ai               OpenAI-compatible SSE chat client
-pkg/config           config.json load/save
-pkg/db               SQLite store and schema
-frontend/src/App.svelte          shell layout
-frontend/src/lib/components      UI components
-frontend/src/lib/stores          runes-based state
-frontend/src/lib/wailsjs         generated Go bindings
-scripts/bundle.sh                quality gate, arm64 .app, zip and SHA256SUMS
-scripts/dev.sh                   build and install the bundle to /Applications
-scripts/release.sh               tag and push a release
-.github/workflows/ci.yml         quality gate
-.github/workflows/release.yml    build and publish the GitHub release
+```sh
+unzip Chattu-macos-arm64.zip
+xattr -dr com.apple.quarantine Chattu.app
+mv Chattu.app /Applications/
+open /Applications/Chattu.app
 ```
 
-App identity (display name, version and copyright) lives in `wails.json` under `info`; the bundle
-identifier is set in `build/darwin/Info.plist`.
+The app is ad-hoc signed, so removing the quarantine attribute is required after downloading.
 
-## Storage
+## Configuration
 
-- `config.json` in the OS app data directory: base URL, chat model, title model, system prompt, API key.
-- `chats.db` in the same directory: threads, messages and attachments.
+Open Settings (⌘,) and set the base URL, API key, chat model, and optional title model or system
+prompt. Settings and chat history are stored in the OS app data directory:
 
-API keys are stored in plain text in `config.json` for now. OS keychain support is planned.
+- `config.json`: base URL, models, system prompt, and API key.
+- `chats.db`: threads, messages, and attachments.
+
+API keys are stored in plain text in `config.json` for now; OS keychain support is planned.
 
 ## Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, commands, project layout, the quality gate, and
+release steps.
 
 ```sh
 wails dev
 ```
 
-To test the installed bundle (Dock icon, app menu, LaunchServices registration):
+## License
 
-```sh
-scripts/dev.sh             # debug build
-scripts/dev.sh --release   # publishable build, same as scripts/bundle.sh
-```
-
-## Build
-
-```sh
-scripts/bundle.sh
-```
-
-Runs the quality gate, regenerates and checks the Wails bindings, builds the arm64 bundle and
-produces:
-
-- `dist/Chattu.app`
-- `dist/Chattu-macos-arm64.zip`
-- `dist/SHA256SUMS`
-
-## Release
-
-Bump `info.productVersion` in `wails.json`, commit it, then:
-
-```sh
-scripts/release.sh v0.1.0
-```
-
-The tag must match `wails.json`; the script builds locally, verifies the tree is still clean,
-creates the tag and pushes it. GitHub Actions then builds on an arm64 runner and publishes the zip
-and checksum as a GitHub release.
+[MIT](LICENSE) © Nilambar Sharma ([nilambar.net](https://nilambar.net/))
