@@ -3,6 +3,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -27,6 +28,7 @@ CREATE TABLE IF NOT EXISTS threads (
 	frequency_penalty REAL,
 	reasoning_effort  TEXT    NOT NULL DEFAULT '',
 	context_window    INTEGER,
+	web_tools         INTEGER NOT NULL DEFAULT 0,
 	created_at        INTEGER NOT NULL,
 	updated_at        INTEGER NOT NULL
 );
@@ -40,6 +42,7 @@ CREATE TABLE IF NOT EXISTS messages (
 	prompt_tokens     INTEGER NOT NULL DEFAULT 0,
 	completion_tokens INTEGER NOT NULL DEFAULT 0,
 	reasoning_tokens  INTEGER NOT NULL DEFAULT 0,
+	tools             TEXT    NOT NULL DEFAULT '',
 	created_at        INTEGER NOT NULL
 );
 
@@ -73,6 +76,7 @@ type Thread struct {
 	FrequencyPenalty *float64 `json:"frequencyPenalty,omitempty"`
 	ReasoningEffort  string   `json:"reasoningEffort"`
 	ContextWindow    *int     `json:"contextWindow,omitempty"`
+	WebTools         bool     `json:"webTools"`
 	CreatedAt        int64    `json:"createdAt"`
 	UpdatedAt        int64    `json:"updatedAt"`
 }
@@ -100,7 +104,17 @@ type Message struct {
 	CompletionTokens int          `json:"completionTokens"`
 	ReasoningTokens  int          `json:"reasoningTokens"`
 	Attachments      []Attachment `json:"attachments,omitempty"`
+	Tools            []ToolStep   `json:"tools,omitempty"`
 	CreatedAt        int64        `json:"createdAt"`
+}
+
+// ToolStep records one tool call made while producing an assistant reply. It
+// is kept for display; tool results are not replayed to the model.
+type ToolStep struct {
+	Name    string `json:"name"`
+	Input   string `json:"input"`
+	Summary string `json:"summary,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 // Attachment is a file stored alongside a user message.
@@ -166,7 +180,7 @@ func (s *Store) Close() error {
 
 const threadColumns = `id, title, model, system_prompt, temperature, top_p,
 	max_tokens, frequency_penalty, reasoning_effort, context_window,
-	created_at, updated_at`
+	web_tools, created_at, updated_at`
 
 type scanner interface {
 	Scan(dest ...any) error
@@ -177,7 +191,7 @@ func scanThread(row scanner) (Thread, error) {
 	err := row.Scan(
 		&t.ID, &t.Title, &t.Model, &t.SystemPrompt, &t.Temperature, &t.TopP,
 		&t.MaxTokens, &t.FrequencyPenalty, &t.ReasoningEffort, &t.ContextWindow,
-		&t.CreatedAt, &t.UpdatedAt,
+		&t.WebTools, &t.CreatedAt, &t.UpdatedAt,
 	)
 	return t, err
 }
@@ -186,10 +200,10 @@ func scanThread(row scanner) (Thread, error) {
 func (s *Store) CreateThread(t Thread) error {
 	_, err := s.db.Exec(`
 		INSERT INTO threads (`+threadColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.ID, t.Title, t.Model, t.SystemPrompt, t.Temperature, t.TopP,
 		t.MaxTokens, t.FrequencyPenalty, t.ReasoningEffort, t.ContextWindow,
-		t.CreatedAt, t.UpdatedAt)
+		t.WebTools, t.CreatedAt, t.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("db: create thread: %w", err)
 	}
@@ -394,6 +408,15 @@ func (s *Store) SetThreadModel(id, model string) error {
 	return nil
 }
 
+// SetThreadWebTools turns web tools on or off for a thread.
+func (s *Store) SetThreadWebTools(id string, enabled bool) error {
+	_, err := s.db.Exec(`UPDATE threads SET web_tools = ? WHERE id = ?`, enabled, id)
+	if err != nil {
+		return fmt.Errorf("db: set thread web tools: %w", err)
+	}
+	return nil
+}
+
 // SetThreadSettings replaces a thread's system prompt and generation settings.
 func (s *Store) SetThreadSettings(id string, settings ThreadSettings) error {
 	_, err := s.db.Exec(`
@@ -426,13 +449,21 @@ func (s *Store) AddMessage(m Message) error {
 	}
 	defer tx.Rollback()
 
+	tools := ""
+	if len(m.Tools) > 0 {
+		data, err := json.Marshal(m.Tools)
+		if err != nil {
+			return fmt.Errorf("db: encode tools: %w", err)
+		}
+		tools = string(data)
+	}
 	if _, err := tx.Exec(
 		`INSERT INTO messages (
 			id, thread_id, role, content, reasoning,
-			prompt_tokens, completion_tokens, reasoning_tokens, created_at
-		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			prompt_tokens, completion_tokens, reasoning_tokens, tools, created_at
+		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.ID, m.ThreadID, m.Role, m.Content, m.Reasoning,
-		m.PromptTokens, m.CompletionTokens, m.ReasoningTokens, m.CreatedAt); err != nil {
+		m.PromptTokens, m.CompletionTokens, m.ReasoningTokens, tools, m.CreatedAt); err != nil {
 		return fmt.Errorf("db: add message: %w", err)
 	}
 
@@ -493,7 +524,7 @@ func (s *Store) DeleteMessagesAfter(threadID, messageID string) error {
 func (s *Store) ListMessages(threadID string) ([]Message, error) {
 	rows, err := s.db.Query(`
 		SELECT id, thread_id, role, content, reasoning,
-		       prompt_tokens, completion_tokens, reasoning_tokens, created_at
+		       prompt_tokens, completion_tokens, reasoning_tokens, tools, created_at
 		FROM messages
 		WHERE thread_id = ?
 		ORDER BY created_at, rowid`, threadID)
@@ -504,12 +535,19 @@ func (s *Store) ListMessages(threadID string) ([]Message, error) {
 	messages := []Message{}
 	for rows.Next() {
 		var m Message
+		var tools string
 		if err := rows.Scan(
 			&m.ID, &m.ThreadID, &m.Role, &m.Content, &m.Reasoning,
-			&m.PromptTokens, &m.CompletionTokens, &m.ReasoningTokens, &m.CreatedAt,
+			&m.PromptTokens, &m.CompletionTokens, &m.ReasoningTokens, &tools, &m.CreatedAt,
 		); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("db: scan message: %w", err)
+		}
+		if tools != "" {
+			if err := json.Unmarshal([]byte(tools), &m.Tools); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("db: decode tools: %w", err)
+			}
 		}
 		messages = append(messages, m)
 	}

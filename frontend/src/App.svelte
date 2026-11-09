@@ -116,6 +116,9 @@
     streaming={chat.streaming}
     streamText={chat.streamText}
     streamReasoning={chat.streamReasoning}
+    streamTools={chat.streamTools}
+    webToolsAvailable={!!chat.config?.ollamaApiKey}
+    onwebtoolschange={(enabled) => chat.setThreadWebTools(enabled)}
     contextUsed={chat.contextUsed}
     contextWindow={chat.contextWindow}
     error={chat.error}

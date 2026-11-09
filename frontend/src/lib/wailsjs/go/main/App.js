@@ -65,3 +65,7 @@ export function SetThreadModel(arg1, arg2) {
 export function SetThreadSettings(arg1, arg2) {
   return window['go']['main']['App']['SetThreadSettings'](arg1, arg2);
 }
+
+export function SetThreadWebTools(arg1, arg2) {
+  return window['go']['main']['App']['SetThreadWebTools'](arg1, arg2);
+}

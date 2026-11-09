@@ -21,6 +21,7 @@ import (
 	"github.com/ernilambar/chattu/pkg/ai"
 	"github.com/ernilambar/chattu/pkg/config"
 	"github.com/ernilambar/chattu/pkg/db"
+	"github.com/ernilambar/chattu/pkg/webtools"
 )
 
 const (
@@ -34,6 +35,9 @@ const (
 	maxAttachmentsBytes    = 20 << 20
 	maxTextAttachmentBytes = 200 << 10
 	maxTitleSourceRunes    = 4000
+	// maxToolRounds caps model turns that may call tools in one reply. The
+	// round after it is sent without tools so the model must answer.
+	maxToolRounds = 5
 )
 
 // App is the backend bridge exposed to the frontend.
@@ -204,6 +208,14 @@ func (a *App) SetThreadModel(threadID, model string) error {
 		return errors.New("model is required")
 	}
 	return a.store.SetThreadModel(threadID, model)
+}
+
+// SetThreadWebTools turns web search and fetch on or off for one thread.
+func (a *App) SetThreadWebTools(threadID string, enabled bool) error {
+	if a.store == nil {
+		return errors.New("database unavailable")
+	}
+	return a.store.SetThreadWebTools(threadID, enabled)
 }
 
 // SetThreadSettings changes one thread's system prompt and generation
@@ -478,24 +490,58 @@ func (a *App) streamReply(thread db.Thread, cfg config.Config, model string) err
 	a.setStreamCancel(cancel)
 	defer a.clearStreamCancel()
 
+	var web *webtools.Client
+	if thread.WebTools && cfg.OllamaAPIKey != "" {
+		web = webtools.New(cfg.OllamaAPIKey)
+	}
+
 	var reply, reasoning strings.Builder
-	usage, err := client.StreamChat(streamCtx, ai.ChatOptions{
-		Model:            model,
-		Messages:         prompt,
-		Temperature:      thread.Temperature,
-		TopP:             thread.TopP,
-		MaxTokens:        thread.MaxTokens,
-		FrequencyPenalty: thread.FrequencyPenalty,
-		ReasoningEffort:  thread.ReasoningEffort,
-	}, func(delta ai.Delta) {
-		reply.WriteString(delta.Content)
-		reasoning.WriteString(delta.Reasoning)
-		runtime.EventsEmit(a.ctx, "chat:delta", chatDelta{
-			ThreadID:  thread.ID,
-			Delta:     delta.Content,
-			Reasoning: delta.Reasoning,
+	var usage ai.Usage
+	var steps []db.ToolStep
+	for round := 0; ; round++ {
+		var tools []ai.Tool
+		if web != nil && round < maxToolRounds {
+			tools = webtools.Definitions()
+		}
+		if round > 0 && reply.Len() > 0 && !strings.HasSuffix(reply.String(), "\n") {
+			// Keep text written before and after a tool call as separate paragraphs.
+			reply.WriteString("\n\n")
+			runtime.EventsEmit(a.ctx, "chat:delta", chatDelta{ThreadID: thread.ID, Delta: "\n\n"})
+		}
+		roundStart := reply.Len()
+		var result ai.Reply
+		result, err = client.StreamChat(streamCtx, ai.ChatOptions{
+			Model:            model,
+			Messages:         prompt,
+			Temperature:      thread.Temperature,
+			TopP:             thread.TopP,
+			MaxTokens:        thread.MaxTokens,
+			FrequencyPenalty: thread.FrequencyPenalty,
+			ReasoningEffort:  thread.ReasoningEffort,
+			Tools:            tools,
+		}, func(delta ai.Delta) {
+			reply.WriteString(delta.Content)
+			reasoning.WriteString(delta.Reasoning)
+			runtime.EventsEmit(a.ctx, "chat:delta", chatDelta{
+				ThreadID:  thread.ID,
+				Delta:     delta.Content,
+				Reasoning: delta.Reasoning,
+			})
 		})
-	})
+		// The last round's prompt covers the whole exchange; output adds up.
+		if result.Usage.PromptTokens > 0 {
+			usage.PromptTokens = result.Usage.PromptTokens
+		}
+		usage.CompletionTokens += result.Usage.CompletionTokens
+		usage.ReasoningTokens += result.Usage.ReasoningTokens
+		if err != nil || len(result.ToolCalls) == 0 || tools == nil {
+			break
+		}
+		prompt, steps = a.runTools(streamCtx, web, thread.ID, prompt, steps, reply.String()[roundStart:], result.ToolCalls)
+		if err = streamCtx.Err(); err != nil {
+			break
+		}
+	}
 
 	// A user cancel keeps whatever text arrived. Any other error, including
 	// cancellation during shutdown, is reported to the caller.
@@ -507,7 +553,7 @@ func (a *App) streamReply(thread db.Thread, cfg config.Config, model string) err
 			return err
 		}
 	}
-	if stopped && strings.TrimSpace(reply.String()) == "" && strings.TrimSpace(reasoning.String()) == "" {
+	if stopped && strings.TrimSpace(reply.String()) == "" && strings.TrimSpace(reasoning.String()) == "" && len(steps) == 0 {
 		return nil
 	}
 
@@ -520,6 +566,7 @@ func (a *App) streamReply(thread db.Thread, cfg config.Config, model string) err
 		PromptTokens:     usage.PromptTokens,
 		CompletionTokens: usage.CompletionTokens,
 		ReasoningTokens:  usage.ReasoningTokens,
+		Tools:            steps,
 		CreatedAt:        time.Now().UnixMilli(),
 	}
 	if err := a.store.AddMessage(assistantMessage); err != nil {
@@ -538,6 +585,41 @@ func (a *App) streamReply(thread db.Thread, cfg config.Config, model string) err
 		a.queueTitle(thread, cfg, model, lastUserTitleSource(history))
 	}
 	return nil
+}
+
+// runTools executes the model's tool calls, appends the call and its results to
+// prompt, and announces each step through chat:tool. Tool failures are returned
+// to the model as text so it can recover.
+func (a *App) runTools(ctx context.Context, web *webtools.Client, threadID string, prompt []ai.Message, steps []db.ToolStep, content string, calls []ai.ToolCall) ([]ai.Message, []db.ToolStep) {
+	for i := range calls {
+		if calls[i].ID == "" {
+			calls[i].ID = fmt.Sprintf("call_%d", len(steps)+i)
+		}
+		calls[i].Type = "function"
+	}
+	var text any
+	if strings.TrimSpace(content) != "" {
+		text = content
+	}
+	prompt = append(prompt, ai.Message{Role: ai.RoleAssistant, Content: text, ToolCalls: calls})
+
+	for _, call := range calls {
+		step := db.ToolStep{Name: call.Function.Name, Input: webtools.Input(call.Function.Arguments)}
+		index := len(steps)
+		steps = append(steps, step)
+		runtime.EventsEmit(a.ctx, "chat:tool", chatTool{ThreadID: threadID, Index: index, Step: step, Running: true})
+
+		result, summary, err := web.Run(ctx, call.Function.Name, call.Function.Arguments)
+		if err != nil {
+			step.Error = err.Error()
+			result = "Error: " + err.Error()
+		}
+		step.Summary = summary
+		steps[index] = step
+		runtime.EventsEmit(a.ctx, "chat:tool", chatTool{ThreadID: threadID, Index: index, Step: step})
+		prompt = append(prompt, ai.Message{Role: ai.RoleTool, ToolCallID: call.ID, Content: result})
+	}
+	return prompt, steps
 }
 
 // lastUserTitleSource describes the most recent user message for title
@@ -604,6 +686,13 @@ type chatDelta struct {
 	ThreadID  string `json:"threadId"`
 	Delta     string `json:"delta"`
 	Reasoning string `json:"reasoning"`
+}
+
+type chatTool struct {
+	ThreadID string      `json:"threadId"`
+	Index    int         `json:"index"`
+	Step     db.ToolStep `json:"step"`
+	Running  bool        `json:"running"`
 }
 
 type chatDone struct {

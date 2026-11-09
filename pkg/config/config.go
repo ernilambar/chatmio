@@ -27,6 +27,8 @@ type Config struct {
 	TopP             *float64 `json:"topP,omitempty"`
 	MaxTokens        *int     `json:"maxTokens,omitempty"`
 	FrequencyPenalty *float64 `json:"frequencyPenalty,omitempty"`
+	// OllamaAPIKey enables the web search and fetch tools. Empty disables them.
+	OllamaAPIKey string `json:"ollamaApiKey"`
 }
 
 // Default returns the configuration used on first launch.
@@ -77,6 +79,7 @@ func (m *Manager) Save(cfg Config) error {
 	cfg.BaseURL = strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
 	cfg.ChatModel = strings.TrimSpace(cfg.ChatModel)
 	cfg.TitleModel = strings.TrimSpace(cfg.TitleModel)
+	cfg.OllamaAPIKey = strings.TrimSpace(cfg.OllamaAPIKey)
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {

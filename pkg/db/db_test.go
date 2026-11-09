@@ -250,3 +250,41 @@ func TestMessageReasoningAndUsageRoundTrip(t *testing.T) {
 		t.Fatalf("message = %+v, want reasoning and usage kept", got)
 	}
 }
+
+func TestWebToolsAndToolStepsRoundTrip(t *testing.T) {
+	store := openTestStore(t)
+	if err := store.CreateThread(Thread{ID: "t1", Title: "New chat", CreatedAt: 1, UpdatedAt: 1}); err != nil {
+		t.Fatalf("CreateThread: %v", err)
+	}
+	if err := store.SetThreadWebTools("t1", true); err != nil {
+		t.Fatalf("SetThreadWebTools: %v", err)
+	}
+	thread, err := store.GetThread("t1")
+	if err != nil {
+		t.Fatalf("GetThread: %v", err)
+	}
+	if !thread.WebTools {
+		t.Fatal("WebTools = false, want true")
+	}
+
+	steps := []ToolStep{
+		{Name: "web_search", Input: "go", Summary: "5 results"},
+		{Name: "web_fetch", Input: "https://go.dev", Error: "timeout"},
+	}
+	if err := store.AddMessage(Message{ID: "m1", ThreadID: "t1", Role: "assistant", Content: "hi", Tools: steps, CreatedAt: 2}); err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+	if err := store.AddMessage(Message{ID: "m2", ThreadID: "t1", Role: "assistant", Content: "plain", CreatedAt: 3}); err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+	messages, err := store.ListMessages("t1")
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(messages[0].Tools) != 2 || messages[0].Tools[1] != steps[1] {
+		t.Fatalf("tools = %+v, want %+v", messages[0].Tools, steps)
+	}
+	if messages[1].Tools != nil {
+		t.Fatalf("plain message tools = %+v, want nil", messages[1].Tools)
+	}
+}

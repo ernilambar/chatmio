@@ -20,6 +20,7 @@ const (
 	RoleSystem    Role = "system"
 	RoleUser      Role = "user"
 	RoleAssistant Role = "assistant"
+	RoleTool      Role = "tool"
 )
 
 // Message is a single chat message. Content is either a string or a
@@ -27,6 +28,38 @@ const (
 type Message struct {
 	Role    Role `json:"role"`
 	Content any  `json:"content"`
+	// ToolCalls is set on assistant messages that request tools.
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	// ToolCallID links a tool result message to the call it answers.
+	ToolCallID string `json:"tool_call_id,omitempty"`
+}
+
+// Tool is a function the model may call.
+type Tool struct {
+	Type     string       `json:"type"`
+	Function ToolFunction `json:"function"`
+}
+
+// ToolFunction describes a callable function with a JSON Schema for its
+// arguments.
+type ToolFunction struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Parameters  any    `json:"parameters"`
+}
+
+// ToolCall is one function call requested by the model. Arguments is the raw
+// JSON string the model produced.
+type ToolCall struct {
+	ID       string           `json:"id"`
+	Type     string           `json:"type"`
+	Function ToolCallFunction `json:"function"`
+}
+
+// ToolCallFunction is the function name and arguments of a ToolCall.
+type ToolCallFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 // ContentPart is one item in a multimodal message.
@@ -67,6 +100,8 @@ type ChatOptions struct {
 	FrequencyPenalty *float64
 	// ReasoningEffort is sent as reasoning_effort when set (low, medium, high).
 	ReasoningEffort string
+	// Tools are offered to the model; nil sends no tools.
+	Tools []Tool
 }
 
 // Delta is one streamed increment. Reasoning carries thinking text from
@@ -168,6 +203,7 @@ type chatRequest struct {
 	MaxTokens        *int      `json:"max_tokens,omitempty"`
 	FrequencyPenalty *float64  `json:"frequency_penalty,omitempty"`
 	ReasoningEffort  string    `json:"reasoning_effort,omitempty"`
+	Tools            []Tool    `json:"tools,omitempty"`
 	StreamOptions    struct {
 		IncludeUsage bool `json:"include_usage"`
 	} `json:"stream_options"`
@@ -179,6 +215,14 @@ type streamChunk struct {
 			Content          string `json:"content"`
 			ReasoningContent string `json:"reasoning_content"`
 			Reasoning        string `json:"reasoning"`
+			ToolCalls        []struct {
+				Index    *int   `json:"index"`
+				ID       string `json:"id"`
+				Function struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				} `json:"function"`
+			} `json:"tool_calls"`
 		} `json:"delta"`
 	} `json:"choices"`
 	Usage *struct {
@@ -193,15 +237,23 @@ type streamChunk struct {
 	} `json:"error"`
 }
 
+// Reply is the result of a finished stream.
+type Reply struct {
+	Usage Usage
+	// ToolCalls are the complete tool calls the model requested, if any.
+	ToolCalls []ToolCall
+}
+
 // StreamChat posts a streaming completion and calls onDelta for each content
-// or reasoning increment. It returns the reported usage after the stream ends.
-func (c *Client) StreamChat(ctx context.Context, opts ChatOptions, onDelta func(Delta)) (Usage, error) {
-	var usage Usage
+// or reasoning increment. It returns the reported usage and any requested tool
+// calls after the stream ends.
+func (c *Client) StreamChat(ctx context.Context, opts ChatOptions, onDelta func(Delta)) (Reply, error) {
+	var reply Reply
 	if c.BaseURL == "" {
-		return usage, fmt.Errorf("ai: base URL is required")
+		return reply, fmt.Errorf("ai: base URL is required")
 	}
 	if opts.Model == "" {
-		return usage, fmt.Errorf("ai: model is required")
+		return reply, fmt.Errorf("ai: model is required")
 	}
 
 	request := chatRequest{
@@ -213,17 +265,18 @@ func (c *Client) StreamChat(ctx context.Context, opts ChatOptions, onDelta func(
 		MaxTokens:        opts.MaxTokens,
 		FrequencyPenalty: opts.FrequencyPenalty,
 		ReasoningEffort:  opts.ReasoningEffort,
+		Tools:            opts.Tools,
 	}
 	request.StreamOptions.IncludeUsage = true
 
 	payload, err := json.Marshal(request)
 	if err != nil {
-		return usage, fmt.Errorf("ai: encode request: %w", err)
+		return reply, fmt.Errorf("ai: encode request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/chat/completions", bytes.NewReader(payload))
 	if err != nil {
-		return usage, fmt.Errorf("ai: build request: %w", err)
+		return reply, fmt.Errorf("ai: build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
@@ -231,13 +284,13 @@ func (c *Client) StreamChat(ctx context.Context, opts ChatOptions, onDelta func(
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return usage, fmt.Errorf("ai: request failed: %w", err)
+		return reply, fmt.Errorf("ai: request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return usage, fmt.Errorf("ai: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		return reply, fmt.Errorf("ai: %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -250,27 +303,30 @@ func (c *Client) StreamChat(ctx context.Context, opts ChatOptions, onDelta func(
 		}
 		data = strings.TrimSpace(data)
 		if data == "[DONE]" {
-			return usage, nil
+			return reply, nil
 		}
 
 		var chunk streamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			return usage, fmt.Errorf("ai: decode stream chunk: %w", err)
+			return reply, fmt.Errorf("ai: decode stream chunk: %w", err)
 		}
 		if chunk.Error != nil {
-			return usage, fmt.Errorf("ai: %s", chunk.Error.Message)
+			return reply, fmt.Errorf("ai: %s", chunk.Error.Message)
 		}
 		if chunk.Usage != nil {
-			usage.PromptTokens = chunk.Usage.PromptTokens
-			usage.CompletionTokens = chunk.Usage.CompletionTokens
+			reply.Usage.PromptTokens = chunk.Usage.PromptTokens
+			reply.Usage.CompletionTokens = chunk.Usage.CompletionTokens
 			if details := chunk.Usage.CompletionTokensDetails; details != nil {
-				usage.ReasoningTokens = details.ReasoningTokens
+				reply.Usage.ReasoningTokens = details.ReasoningTokens
 			}
 		}
 		if len(chunk.Choices) == 0 {
 			continue
 		}
 		delta := chunk.Choices[0].Delta
+		for _, part := range delta.ToolCalls {
+			reply.ToolCalls = mergeToolCall(reply.ToolCalls, part.Index, part.ID, part.Function.Name, part.Function.Arguments)
+		}
 		reasoning := delta.ReasoningContent
 		if reasoning == "" {
 			reasoning = delta.Reasoning
@@ -280,7 +336,33 @@ func (c *Client) StreamChat(ctx context.Context, opts ChatOptions, onDelta func(
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return usage, fmt.Errorf("ai: read stream: %w", err)
+		return reply, fmt.Errorf("ai: read stream: %w", err)
 	}
-	return usage, nil
+	return reply, nil
+}
+
+// mergeToolCall folds one streamed tool-call fragment into calls. Fragments
+// share an index; providers that omit it start a new call with each new id.
+func mergeToolCall(calls []ToolCall, index *int, id, name, arguments string) []ToolCall {
+	i := len(calls) - 1
+	switch {
+	case index != nil:
+		i = *index
+	case id != "" && (i < 0 || calls[i].ID != id):
+		i = len(calls)
+	}
+	if i < 0 {
+		i = 0
+	}
+	for len(calls) <= i {
+		calls = append(calls, ToolCall{Type: "function"})
+	}
+	if id != "" {
+		calls[i].ID = id
+	}
+	if calls[i].Function.Name == "" {
+		calls[i].Function.Name = name
+	}
+	calls[i].Function.Arguments += arguments
+	return calls
 }

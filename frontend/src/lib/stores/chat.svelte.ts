@@ -12,7 +12,8 @@ import {
   SaveConfig,
   SendMessage,
   SetThreadModel,
-  SetThreadSettings
+  SetThreadSettings,
+  SetThreadWebTools
 } from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 import { config, db } from '../wailsjs/go/models'
@@ -21,6 +22,18 @@ interface ChatDelta {
   threadId: string
   delta: string
   reasoning: string
+}
+
+interface ChatTool {
+  threadId: string
+  index: number
+  step: db.ToolStep
+  running: boolean
+}
+
+export interface StreamTool {
+  step: db.ToolStep
+  running: boolean
 }
 
 interface ChatDone {
@@ -84,6 +97,7 @@ class ChatStore {
   streaming = $state(false)
   streamText = $state('')
   streamReasoning = $state('')
+  streamTools = $state<StreamTool[]>([])
   error = $state<string | null>(null)
 
   private unsubscribers: Array<() => void> = []
@@ -136,6 +150,12 @@ class ChatStore {
     void this.loadModels()
   }
 
+  private resetStream(): void {
+    this.streamText = ''
+    this.streamReasoning = ''
+    this.streamTools = []
+  }
+
   destroy(): void {
     for (const unsubscribe of this.unsubscribers) unsubscribe()
     this.unsubscribers = []
@@ -148,10 +168,15 @@ class ChatStore {
         this.streamText += payload.delta
         this.streamReasoning += payload.reasoning
       }),
+      EventsOn('chat:tool', (payload: ChatTool) => {
+        if (payload.threadId !== this.activeId) return
+        const next = [...this.streamTools]
+        next[payload.index] = { step: payload.step, running: payload.running }
+        this.streamTools = next
+      }),
       EventsOn('chat:done', async (payload: ChatDone) => {
         if (payload.threadId !== this.activeId) return
-        this.streamText = ''
-        this.streamReasoning = ''
+        this.resetStream()
         this.messages = await GetMessages(payload.threadId)
         this.threads = await ListThreads()
       }),
@@ -195,8 +220,7 @@ class ChatStore {
     if (this.streaming || id === this.activeId) return
     this.activeId = id
     this.error = null
-    this.streamText = ''
-    this.streamReasoning = ''
+    this.resetStream()
     this.failedSend = null
     this.messages = await GetMessages(id)
   }
@@ -208,8 +232,7 @@ class ChatStore {
     const threadId = this.activeId
     this.streaming = true
     this.error = null
-    this.streamText = ''
-    this.streamReasoning = ''
+    this.resetStream()
     this.failedSend = null
 
     let attachments: db.AttachmentInput[]
@@ -255,8 +278,7 @@ class ChatStore {
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err)
       this.failedSend = { content, files }
-      this.streamText = ''
-      this.streamReasoning = ''
+      this.resetStream()
       this.messages = await GetMessages(threadId)
     } finally {
       this.streaming = false
@@ -296,8 +318,7 @@ class ChatStore {
     const threadId = this.activeId
     this.streaming = true
     this.error = null
-    this.streamText = ''
-    this.streamReasoning = ''
+    this.resetStream()
 
     const messages = [...this.messages]
     while (messages.length > 0 && messages[messages.length - 1].role === 'assistant') {
@@ -312,8 +333,7 @@ class ChatStore {
       this.threads = await ListThreads()
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err)
-      this.streamText = ''
-      this.streamReasoning = ''
+      this.resetStream()
       this.messages = await GetMessages(threadId)
     } finally {
       this.streaming = false
@@ -329,8 +349,7 @@ class ChatStore {
     const threadId = this.activeId
     this.streaming = true
     this.error = null
-    this.streamText = ''
-    this.streamReasoning = ''
+    this.resetStream()
 
     const index = this.messages.findIndex((message) => message.id === messageId)
     if (index >= 0) {
@@ -346,8 +365,7 @@ class ChatStore {
       this.threads = await ListThreads()
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err)
-      this.streamText = ''
-      this.streamReasoning = ''
+      this.resetStream()
       this.messages = await GetMessages(threadId)
     } finally {
       this.streaming = false
@@ -367,6 +385,19 @@ class ChatStore {
       await SetThreadModel(threadId, model)
       this.threads = this.threads.map((thread) =>
         thread.id === threadId ? db.Thread.createFrom({ ...thread, model }) : thread
+      )
+    } catch (err) {
+      this.error = err instanceof Error ? err.message : String(err)
+    }
+  }
+
+  async setThreadWebTools(enabled: boolean): Promise<void> {
+    if (!this.activeId) return
+    const threadId = this.activeId
+    try {
+      await SetThreadWebTools(threadId, enabled)
+      this.threads = this.threads.map((thread) =>
+        thread.id === threadId ? db.Thread.createFrom({ ...thread, webTools: enabled }) : thread
       )
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err)
@@ -405,8 +436,7 @@ class ChatStore {
 
       this.activeId = null
       this.messages = []
-      this.streamText = ''
-      this.streamReasoning = ''
+      this.resetStream()
       const next = this.threads[0]
       if (next) {
         await this.select(next.id)

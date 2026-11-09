@@ -27,6 +27,7 @@
   let topP = $state<number | null>(null)
   let maxTokens = $state<number | null>(null)
   let frequencyPenalty = $state<number | null>(null)
+  let ollamaApiKey = $state('')
   let models = $state<string[]>([])
   let modelsLoading = $state(false)
   let modelsError = $state<string | null>(null)
@@ -52,6 +53,7 @@
       topP = cfg.topP ?? null
       maxTokens = cfg.maxTokens ?? null
       frequencyPenalty = cfg.frequencyPenalty ?? null
+      ollamaApiKey = cfg.ollamaApiKey
       error = null
       untrack(() => void loadModels())
     }
@@ -105,7 +107,8 @@
           temperature: optional(temperature),
           topP: optional(topP),
           maxTokens: optional(maxTokens),
-          frequencyPenalty: optional(frequencyPenalty)
+          frequencyPenalty: optional(frequencyPenalty),
+          ollamaApiKey
         })
       )
       onclose()
@@ -293,6 +296,20 @@
           Copied into new chats. Existing chats keep their settings; clear a value in chat settings to
           use the provider default.
         </p>
+
+        <label class="block space-y-1">
+          <span class="text-xs text-muted">Ollama API key (web search)</span>
+          <input
+            bind:value={ollamaApiKey}
+            type="password"
+            class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+            placeholder="Optional"
+          />
+          <span class="text-[11px] text-muted">
+            Enables the web search toggle in chats. Queries and fetched URLs are sent to ollama.com.
+            The chat model must support tool calling.
+          </span>
+        </label>
       </div>
 
       {#if error}

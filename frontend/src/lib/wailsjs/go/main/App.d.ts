@@ -35,3 +35,5 @@ export function SendMessage(arg1:string,arg2:string,arg3:Array<db.AttachmentInpu
 export function SetThreadModel(arg1:string,arg2:string):Promise<void>;
 
 export function SetThreadSettings(arg1:string,arg2:db.ThreadSettings):Promise<void>;
+
+export function SetThreadWebTools(arg1:string,arg2:boolean):Promise<void>;

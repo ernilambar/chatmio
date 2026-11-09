@@ -3,12 +3,15 @@
     ArrowDown,
     Check,
     Copy,
+    FileText,
+    Globe,
     Loader2,
     MessageSquare,
     PanelLeft,
     Paperclip,
     Pencil,
     RotateCcw,
+    Search,
     Send,
     SlidersHorizontal,
     Square,
@@ -20,6 +23,7 @@
   import { copyText } from '../clipboard'
   import Markdown from './Markdown.svelte'
   import { formatTokens, splitThinking } from '../reasoning'
+  import type { StreamTool } from '../stores/chat.svelte'
 
   let {
     thread,
@@ -27,6 +31,9 @@
     streaming,
     streamText,
     streamReasoning,
+    streamTools = [],
+    webToolsAvailable = false,
+    onwebtoolschange,
     error,
     models,
     defaultModel,
@@ -51,6 +58,9 @@
     streaming: boolean
     streamText: string
     streamReasoning: string
+    streamTools?: StreamTool[]
+    webToolsAvailable?: boolean
+    onwebtoolschange?: (enabled: boolean) => void
     error: string | null
     models: string[]
     defaultModel: string
@@ -287,6 +297,29 @@
   }
 </script>
 
+{#snippet toolSteps(tools: StreamTool[])}
+  <div class="mb-2 space-y-1 text-xs text-muted">
+    {#each tools as tool, index (index)}
+      <div class="flex min-w-0 items-center gap-1.5" title={tool.step.error || tool.step.input}>
+        {#if tool.running}
+          <Loader2 size={12} class="shrink-0 animate-spin" />
+        {:else if tool.step.name === 'web_fetch'}
+          <FileText size={12} class="shrink-0" />
+        {:else}
+          <Search size={12} class="shrink-0" />
+        {/if}
+        <span class="shrink-0">{tool.step.name === 'web_fetch' ? 'Read' : 'Searched'}</span>
+        <span class="truncate text-fg/80">{tool.step.input}</span>
+        {#if tool.step.error}
+          <span class="shrink-0 text-red-500">· failed</span>
+        {:else if tool.step.summary}
+          <span class="shrink-0 truncate">· {tool.step.summary}</span>
+        {/if}
+      </div>
+    {/each}
+  </div>
+{/snippet}
+
 <main class="flex min-w-0 flex-1 flex-col">
   <header class="flex items-start justify-between gap-3 border-b border-line px-6 py-3">
     {#if sidebarHidden}
@@ -432,6 +465,9 @@
                   {/each}
                 </div>
               {/if}
+              {#if message.tools?.length}
+                {@render toolSteps(message.tools.map((step) => ({ step, running: false })))}
+              {/if}
               {#if parts.reasoning}
                 <details class="mb-2 text-xs text-muted">
                   <summary class="cursor-pointer select-none">Thoughts</summary>
@@ -493,6 +529,9 @@
         {#if streaming}
           <div class="flex justify-start">
             <div class="min-w-0 flex-1 py-0.5 text-sm leading-relaxed">
+              {#if streamTools.length}
+                {@render toolSteps(streamTools)}
+              {/if}
               {#if streamParts.reasoning}
                 <details class="mb-2 text-xs text-muted" open={!streamParts.content}>
                   <summary class="cursor-pointer select-none">
@@ -614,6 +653,20 @@
       >
         <Paperclip size={16} />
       </button>
+      {#if webToolsAvailable && thread}
+        <button
+          type="button"
+          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors disabled:opacity-40 {thread.webTools
+            ? 'bg-accent/10 text-accent'
+            : 'text-muted hover:text-fg'}"
+          title={thread.webTools ? 'Web search on' : 'Web search off'}
+          aria-pressed={thread.webTools}
+          disabled={streaming}
+          onclick={() => onwebtoolschange?.(!thread.webTools)}
+        >
+          <Globe size={16} />
+        </button>
+      {/if}
       <textarea
         bind:this={inputEl}
         bind:value={draft}

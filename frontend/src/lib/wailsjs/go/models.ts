@@ -11,6 +11,7 @@ export namespace config {
 	    topP?: number;
 	    maxTokens?: number;
 	    frequencyPenalty?: number;
+	    ollamaApiKey: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -28,6 +29,7 @@ export namespace config {
 	        this.topP = source["topP"];
 	        this.maxTokens = source["maxTokens"];
 	        this.frequencyPenalty = source["frequencyPenalty"];
+	        this.ollamaApiKey = source["ollamaApiKey"];
 	    }
 	}
 
@@ -75,6 +77,24 @@ export namespace db {
 	        this.data = source["data"];
 	    }
 	}
+	export class ToolStep {
+	    name: string;
+	    input: string;
+	    summary?: string;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ToolStep(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.input = source["input"];
+	        this.summary = source["summary"];
+	        this.error = source["error"];
+	    }
+	}
 	export class Message {
 	    id: string;
 	    threadId: string;
@@ -85,6 +105,7 @@ export namespace db {
 	    completionTokens: number;
 	    reasoningTokens: number;
 	    attachments?: Attachment[];
+	    tools?: ToolStep[];
 	    createdAt: number;
 	
 	    static createFrom(source: any = {}) {
@@ -102,6 +123,7 @@ export namespace db {
 	        this.completionTokens = source["completionTokens"];
 	        this.reasoningTokens = source["reasoningTokens"];
 	        this.attachments = this.convertValues(source["attachments"], Attachment);
+	        this.tools = this.convertValues(source["tools"], ToolStep);
 	        this.createdAt = source["createdAt"];
 	    }
 	
@@ -150,6 +172,7 @@ export namespace db {
 	    frequencyPenalty?: number;
 	    reasoningEffort: string;
 	    contextWindow?: number;
+	    webTools: boolean;
 	    createdAt: number;
 	    updatedAt: number;
 	
@@ -169,6 +192,7 @@ export namespace db {
 	        this.frequencyPenalty = source["frequencyPenalty"];
 	        this.reasoningEffort = source["reasoningEffort"];
 	        this.contextWindow = source["contextWindow"];
+	        this.webTools = source["webTools"];
 	        this.createdAt = source["createdAt"];
 	        this.updatedAt = source["updatedAt"];
 	    }
