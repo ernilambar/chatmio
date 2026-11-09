@@ -5,6 +5,13 @@ Fast, local-first desktop client for any OpenAI-compatible API.
 Chat completions use the configured chat model; thread titles use the title model and fall back to
 the chat model when no title model is set.
 
+## Features
+
+- Per-chat model selection, changeable from the chat header.
+- Searchable model picker in settings, populated from the provider's `GET /models`.
+- Image and text-file attachments; unsupported binary files are rejected before sending.
+- Rename and delete chats, copy messages, and automatic titles with a local fallback.
+
 ## Stack
 
 - Wails v2 (Go + native WebView)
@@ -38,7 +45,7 @@ identifier is set in `build/darwin/Info.plist`.
 ## Storage
 
 - `config.json` in the OS app data directory: base URL, chat model, title model, system prompt, API key.
-- `chats.db` in the same directory: threads and messages.
+- `chats.db` in the same directory: threads, messages and attachments.
 
 API keys are stored in plain text in `config.json` for now. OS keychain support is planned.
 

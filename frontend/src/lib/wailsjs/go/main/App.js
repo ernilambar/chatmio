@@ -6,6 +6,10 @@ export function CreateThread() {
   return window['go']['main']['App']['CreateThread']();
 }
 
+export function DeleteThread(arg1) {
+  return window['go']['main']['App']['DeleteThread'](arg1);
+}
+
 export function GetConfig() {
   return window['go']['main']['App']['GetConfig']();
 }
@@ -14,14 +18,26 @@ export function GetMessages(arg1) {
   return window['go']['main']['App']['GetMessages'](arg1);
 }
 
+export function ListModels(arg1, arg2) {
+  return window['go']['main']['App']['ListModels'](arg1, arg2);
+}
+
 export function ListThreads() {
   return window['go']['main']['App']['ListThreads']();
+}
+
+export function RenameThread(arg1, arg2) {
+  return window['go']['main']['App']['RenameThread'](arg1, arg2);
 }
 
 export function SaveConfig(arg1) {
   return window['go']['main']['App']['SaveConfig'](arg1);
 }
 
-export function SendMessage(arg1, arg2) {
-  return window['go']['main']['App']['SendMessage'](arg1, arg2);
+export function SendMessage(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SendMessage'](arg1, arg2, arg3);
+}
+
+export function SetThreadModel(arg1, arg2) {
+  return window['go']['main']['App']['SetThreadModel'](arg1, arg2);
 }

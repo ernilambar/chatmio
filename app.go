@@ -2,13 +2,18 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"log"
+	"mime"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -19,13 +24,18 @@ import (
 )
 
 const (
-	defaultThreadTitle = "New chat"
-	defaultTemperature = 0.7
-	defaultTopP        = 1.0
-	defaultMaxTokens   = 2048
-	titleTemperature   = 0.2
-	titleMaxTokens     = 32
-	titlePrompt        = "Generate a short title for this conversation. Reply with only the title: 3 to 6 words, no quotes, no trailing punctuation."
+	defaultThreadTitle     = "New chat"
+	defaultTemperature     = 0.7
+	defaultTopP            = 1.0
+	defaultMaxTokens       = 2048
+	titleTemperature       = 0.2
+	titleMaxTokens         = 32
+	titlePrompt            = "Generate a short title for this conversation. Reply with only the title: 3 to 6 words, no quotes, no trailing punctuation."
+	maxAttachments         = 10
+	maxAttachmentBytes     = 10 << 20
+	maxAttachmentsBytes    = 20 << 20
+	maxTextAttachmentBytes = 200 << 10
+	maxTitleSourceRunes    = 4000
 )
 
 // App is the backend bridge exposed to the frontend.
@@ -107,10 +117,15 @@ func (a *App) CreateThread() (db.Thread, error) {
 	if a.store == nil {
 		return db.Thread{}, errors.New("database unavailable")
 	}
+	cfg, err := a.config.Load()
+	if err != nil {
+		return db.Thread{}, err
+	}
 	now := time.Now().UnixMilli()
 	thread := db.Thread{
 		ID:               uuid.NewString(),
 		Title:            defaultThreadTitle,
+		Model:            strings.TrimSpace(cfg.ChatModel),
 		Temperature:      defaultTemperature,
 		TopP:             defaultTopP,
 		MaxTokens:        defaultMaxTokens,
@@ -129,15 +144,73 @@ func (a *App) GetMessages(threadID string) ([]db.Message, error) {
 	if a.store == nil {
 		return nil, errors.New("database unavailable")
 	}
-	return a.store.ListMessages(threadID)
+	messages, err := a.store.ListMessages(threadID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range messages {
+		for j := range messages[i].Attachments {
+			att := &messages[i].Attachments[j]
+			if isImageAttachment(att.MimeType) {
+				att.DataURL = attachmentDataURL(*att)
+			}
+		}
+	}
+	return messages, nil
+}
+
+// SetThreadModel changes the model used by one thread.
+func (a *App) SetThreadModel(threadID, model string) error {
+	if a.store == nil {
+		return errors.New("database unavailable")
+	}
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return errors.New("model is required")
+	}
+	return a.store.SetThreadModel(threadID, model)
+}
+
+// RenameThread sets a user-provided title.
+func (a *App) RenameThread(threadID, title string) error {
+	if a.store == nil {
+		return errors.New("database unavailable")
+	}
+	title = strings.Join(strings.Fields(title), " ")
+	if title == "" {
+		return errors.New("title is required")
+	}
+	return a.store.UpdateThreadMeta(threadID, truncateRunes(title, 120), time.Now().UnixMilli())
+}
+
+// DeleteThread removes a thread and its messages.
+func (a *App) DeleteThread(threadID string) error {
+	if a.store == nil {
+		return errors.New("database unavailable")
+	}
+	return a.store.DeleteThread(threadID)
+}
+
+// ListModels fetches available model identifiers for the provider settings the
+// user is editing, even before they are saved.
+func (a *App) ListModels(baseURL, apiKey string) ([]string, error) {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return nil, errors.New("base URL is required")
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return ai.New(baseURL, apiKey, nil).ListModels(ctx)
 }
 
 // SendMessage stores the user message, streams the assistant reply via
 // chat:delta events and persists the final message. It returns when streaming
 // finishes.
-func (a *App) SendMessage(threadID, content string) error {
+func (a *App) SendMessage(threadID, content string, attachments []db.AttachmentInput) error {
 	content = strings.TrimSpace(content)
-	if content == "" {
+	if content == "" && len(attachments) == 0 {
 		return errors.New("message is empty")
 	}
 	if a.ctx == nil {
@@ -162,17 +235,26 @@ func (a *App) SendMessage(threadID, content string) error {
 	if cfg.BaseURL == "" {
 		return errors.New("set a base URL in settings")
 	}
-	if cfg.ChatModel == "" {
+	model := strings.TrimSpace(thread.Model)
+	if model == "" {
+		model = strings.TrimSpace(cfg.ChatModel)
+	}
+	if model == "" {
 		return errors.New("set a chat model in settings")
 	}
 
 	now := time.Now().UnixMilli()
+	files, err := prepareAttachments(attachments, now)
+	if err != nil {
+		return err
+	}
 	userMessage := db.Message{
-		ID:        uuid.NewString(),
-		ThreadID:  threadID,
-		Role:      string(ai.RoleUser),
-		Content:   content,
-		CreatedAt: now,
+		ID:          uuid.NewString(),
+		ThreadID:    threadID,
+		Role:        string(ai.RoleUser),
+		Content:     content,
+		Attachments: files,
+		CreatedAt:   now,
 	}
 	if err := a.store.AddMessage(userMessage); err != nil {
 		return err
@@ -191,7 +273,7 @@ func (a *App) SendMessage(threadID, content string) error {
 		prompt = append(prompt, ai.Message{Role: ai.RoleSystem, Content: systemPrompt})
 	}
 	for _, m := range history {
-		prompt = append(prompt, ai.Message{Role: ai.Role(m.Role), Content: m.Content})
+		prompt = append(prompt, toAIMessage(m))
 	}
 
 	needsTitle := thread.Title == "" || thread.Title == defaultThreadTitle
@@ -199,7 +281,7 @@ func (a *App) SendMessage(threadID, content string) error {
 	client := ai.New(cfg.BaseURL, cfg.APIKey, nil)
 	var reply strings.Builder
 	err = client.StreamChat(a.ctx, ai.ChatOptions{
-		Model:            cfg.ChatModel,
+		Model:            model,
 		Messages:         prompt,
 		Temperature:      &thread.Temperature,
 		TopP:             &thread.TopP,
@@ -228,7 +310,7 @@ func (a *App) SendMessage(threadID, content string) error {
 	}
 	title := thread.Title
 	if needsTitle {
-		title = a.generateTitle(client, cfg, content)
+		title = a.generateTitle(client, cfg, model, titleSource(content, files))
 	}
 	if err := a.store.UpdateThreadMeta(threadID, title, time.Now().UnixMilli()); err != nil {
 		return err
@@ -251,10 +333,165 @@ type chatDone struct {
 	Message  db.Message `json:"message"`
 }
 
+func normalizeMIME(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func isImageAttachment(mimeType string) bool {
+	return strings.HasPrefix(normalizeMIME(mimeType), "image/")
+}
+
+func isTextAttachment(mimeType, name string) bool {
+	mediaType := normalizeMIME(mimeType)
+	mediaType, _, _ = strings.Cut(mediaType, ";")
+	if strings.HasPrefix(mediaType, "text/") {
+		return true
+	}
+	switch mediaType {
+	case "application/json", "application/xml", "application/yaml",
+		"application/x-yaml", "application/toml", "application/javascript",
+		"application/x-javascript", "application/x-sh", "application/sql":
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".md", ".markdown", ".txt", ".json", ".jsonl", ".csv", ".tsv",
+		".yaml", ".yml", ".toml", ".xml", ".html", ".htm", ".css", ".js",
+		".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".go", ".py", ".rb", ".java",
+		".c", ".h", ".cpp", ".hpp", ".rs", ".sh", ".bash", ".zsh", ".sql",
+		".log", ".ini", ".conf", ".env":
+		return true
+	}
+	return false
+}
+
+func attachmentDataURL(att db.Attachment) string {
+	return "data:" + att.MimeType + ";base64," + base64.StdEncoding.EncodeToString(att.Data)
+}
+
+func prepareAttachments(inputs []db.AttachmentInput, now int64) ([]db.Attachment, error) {
+	if len(inputs) == 0 {
+		return nil, nil
+	}
+	if len(inputs) > maxAttachments {
+		return nil, fmt.Errorf("too many attachments (max %d)", maxAttachments)
+	}
+
+	total := 0
+	attachments := make([]db.Attachment, 0, len(inputs))
+	for _, input := range inputs {
+		name := truncateRunes(strings.TrimSpace(input.Name), 200)
+		if name == "" {
+			name = "attachment"
+		}
+		encoded := strings.TrimSpace(input.Data)
+		if strings.HasPrefix(encoded, "data:") {
+			if _, rest, ok := strings.Cut(encoded, ","); ok {
+				encoded = rest
+			}
+		}
+		data, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			data, err = base64.RawStdEncoding.DecodeString(encoded)
+			if err != nil {
+				return nil, fmt.Errorf("attachment %q is not valid base64", name)
+			}
+		}
+		if len(data) == 0 {
+			return nil, fmt.Errorf("attachment %q is empty", name)
+		}
+		if len(data) > maxAttachmentBytes {
+			return nil, fmt.Errorf("attachment %q exceeds %d MB", name, maxAttachmentBytes>>20)
+		}
+		total += len(data)
+		if total > maxAttachmentsBytes {
+			return nil, fmt.Errorf("attachments exceed %d MB total", maxAttachmentsBytes>>20)
+		}
+
+		mimeType := normalizeMIME(input.MimeType)
+		if mimeType == "" || mimeType == "application/octet-stream" {
+			if inferred := normalizeMIME(mime.TypeByExtension(strings.ToLower(filepath.Ext(name)))); inferred != "" {
+				mimeType = inferred
+			}
+		}
+		if mimeType == "" || mimeType == "application/octet-stream" {
+			mimeType = normalizeMIME(http.DetectContentType(data))
+		}
+		if !isImageAttachment(mimeType) && !isTextAttachment(mimeType, name) {
+			return nil, fmt.Errorf("attachment %q has unsupported type %s; attach images or text files", name, mimeType)
+		}
+
+		attachments = append(attachments, db.Attachment{
+			ID:        uuid.NewString(),
+			Name:      name,
+			MimeType:  mimeType,
+			Size:      int64(len(data)),
+			Data:      data,
+			CreatedAt: now,
+		})
+	}
+	return attachments, nil
+}
+
+func titleSource(content string, attachments []db.Attachment) string {
+	if content = strings.TrimSpace(content); content != "" {
+		return truncateRunes(content, maxTitleSourceRunes)
+	}
+	if len(attachments) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(attachments))
+	for _, att := range attachments {
+		names = append(names, att.Name)
+	}
+	return "Attached: " + strings.Join(names, ", ")
+}
+
+// toAIMessage adds text-file contents inline and turns images into content
+// parts. Other attachments are rejected before they reach storage.
+func toAIMessage(m db.Message) ai.Message {
+	role := ai.Role(m.Role)
+	if len(m.Attachments) == 0 {
+		return ai.Message{Role: role, Content: m.Content}
+	}
+
+	text := strings.TrimSpace(m.Content)
+	parts := make([]ai.ContentPart, 0, len(m.Attachments)+1)
+	for _, att := range m.Attachments {
+		if isImageAttachment(att.MimeType) {
+			parts = append(parts, ai.ImagePart(attachmentDataURL(att)))
+			continue
+		}
+		if isTextAttachment(att.MimeType, att.Name) {
+			content := string(att.Data)
+			if len([]rune(content)) > maxTextAttachmentBytes {
+				content = truncateRunes(content, maxTextAttachmentBytes) + "\n[truncated]"
+			}
+			if text != "" {
+				text += "\n\n"
+			}
+			text += fmt.Sprintf("<file name=%q>\n%s\n</file>", att.Name, content)
+		}
+	}
+
+	if len(parts) == 0 {
+		return ai.Message{Role: role, Content: text}
+	}
+	if text != "" {
+		parts = append([]ai.ContentPart{ai.TextPart(text)}, parts...)
+	}
+	return ai.Message{Role: role, Content: parts}
+}
+
 // generateTitle asks the title model for a short thread title and falls back to
 // the first user message when the request fails.
-func (a *App) generateTitle(client *ai.Client, cfg config.Config, content string) string {
+func (a *App) generateTitle(client *ai.Client, cfg config.Config, fallbackModel, content string) string {
+	if strings.TrimSpace(content) == "" {
+		return defaultThreadTitle
+	}
 	model := cfg.TitleModel
+	if model == "" {
+		model = fallbackModel
+	}
 	if model == "" {
 		model = cfg.ChatModel
 	}
@@ -286,9 +523,16 @@ func (a *App) generateTitle(client *ai.Client, cfg config.Config, content string
 func normalizeTitle(raw, content string) string {
 	title := strings.TrimSpace(raw)
 	title = strings.TrimSpace(strings.TrimPrefix(title, "Title:"))
+	title = strings.TrimSpace(strings.TrimPrefix(title, "title:"))
 	title = strings.TrimSpace(strings.Trim(title, "\"'`*"))
 	title = strings.Join(strings.Fields(title), " ")
 	title = strings.TrimRight(title, ".!?,;:")
+	lower := strings.ToLower(title)
+	for _, prefix := range []string{"i'm sorry", "i am sorry", "i cannot", "i can't", "as an ai"} {
+		if strings.HasPrefix(lower, prefix) {
+			return titleFromContent(content)
+		}
+	}
 	if title == "" {
 		return titleFromContent(content)
 	}
@@ -296,11 +540,32 @@ func normalizeTitle(raw, content string) string {
 }
 
 func titleFromContent(content string) string {
-	title := strings.Join(strings.Fields(content), " ")
-	if title == "" {
+	text := strings.TrimSpace(content)
+	// Use the first non-empty line and drop common Markdown prefixes.
+	for _, line := range strings.Split(text, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			text = line
+			break
+		}
+	}
+	text = strings.TrimSpace(strings.TrimPrefix(text, "```"))
+	text = strings.TrimLeft(text, "#>-*` ")
+	text = strings.Trim(text, "\"'`*_")
+	words := strings.Fields(text)
+	if len(words) == 0 {
 		return defaultThreadTitle
 	}
-	return truncateRunes(title, 60)
+	if len(words) > 8 {
+		words = words[:8]
+	}
+	title := strings.TrimRight(strings.Join(words, " "), ".,!?;:")
+	title = truncateRunes(title, 60)
+	runes := []rune(title)
+	if len(runes) == 0 {
+		return defaultThreadTitle
+	}
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
 }
 
 func truncateRunes(s string, limit int) string {

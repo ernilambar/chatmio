@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 )
 
@@ -21,10 +22,39 @@ const (
 	RoleAssistant Role = "assistant"
 )
 
-// Message is a single chat message.
+// Message is a single chat message. Content is either a string or a
+// []ContentPart for messages that include images.
 type Message struct {
-	Role    Role   `json:"role"`
-	Content string `json:"content"`
+	Role    Role `json:"role"`
+	Content any  `json:"content"`
+}
+
+// ContentPart is one item in a multimodal message.
+type ContentPart struct {
+	Type     string    `json:"type"`
+	Text     string    `json:"text,omitempty"`
+	ImageURL *ImageURL `json:"image_url,omitempty"`
+}
+
+// ImageURL points at an image supplied as a data URL.
+type ImageURL struct {
+	URL string `json:"url"`
+}
+
+// TextPart returns a text content part.
+func TextPart(text string) ContentPart {
+	return ContentPart{Type: "text", Text: text}
+}
+
+// ImagePart returns an image content part.
+func ImagePart(url string) ContentPart {
+	return ContentPart{Type: "image_url", ImageURL: &ImageURL{URL: url}}
+}
+
+// Model is one entry returned by GET /models.
+type Model struct {
+	ID      string `json:"id"`
+	OwnedBy string `json:"owned_by"`
 }
 
 // ChatOptions is a streaming chat request.
@@ -53,6 +83,63 @@ func New(baseURL, apiKey string, headers map[string]string) *Client {
 		Headers: headers,
 		HTTP:    http.DefaultClient,
 	}
+}
+
+func (c *Client) setHeaders(req *http.Request) {
+	if c.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	}
+	for key, value := range c.Headers {
+		req.Header.Set(key, value)
+	}
+}
+
+// ListModels returns the model identifiers exposed by GET /models.
+func (c *Client) ListModels(ctx context.Context) ([]string, error) {
+	if c.BaseURL == "" {
+		return nil, fmt.Errorf("ai: base URL is required")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/models", nil)
+	if err != nil {
+		return nil, fmt.Errorf("ai: build models request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	c.setHeaders(req)
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("ai: models request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("ai: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+
+	var payload struct {
+		Data []Model `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("ai: decode models: %w", err)
+	}
+
+	seen := make(map[string]struct{}, len(payload.Data))
+	ids := make([]string, 0, len(payload.Data))
+	for _, model := range payload.Data {
+		id := strings.TrimSpace(model.ID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids, nil
 }
 
 type chatRequest struct {
@@ -105,12 +192,7 @@ func (c *Client) StreamChat(ctx context.Context, opts ChatOptions, onToken func(
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
-	if c.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.APIKey)
-	}
-	for key, value := range c.Headers {
-		req.Header.Set(key, value)
-	}
+	c.setHeaders(req)
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {

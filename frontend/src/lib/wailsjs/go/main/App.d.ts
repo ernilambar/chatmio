@@ -5,12 +5,20 @@ import {config} from '../models';
 
 export function CreateThread():Promise<db.Thread>;
 
+export function DeleteThread(arg1:string):Promise<void>;
+
 export function GetConfig():Promise<config.Config>;
 
 export function GetMessages(arg1:string):Promise<Array<db.Message>>;
 
+export function ListModels(arg1:string,arg2:string):Promise<Array<string>>;
+
 export function ListThreads():Promise<Array<db.Thread>>;
+
+export function RenameThread(arg1:string,arg2:string):Promise<void>;
 
 export function SaveConfig(arg1:config.Config):Promise<void>;
 
-export function SendMessage(arg1:string,arg2:string):Promise<void>;
+export function SendMessage(arg1:string,arg2:string,arg3:Array<db.AttachmentInput>):Promise<void>;
+
+export function SetThreadModel(arg1:string,arg2:string):Promise<void>;
