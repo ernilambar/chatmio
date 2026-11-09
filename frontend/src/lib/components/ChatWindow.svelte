@@ -337,14 +337,13 @@
         <p class="text-sm">Send a message to start the conversation.</p>
       </div>
     {:else}
-      <div class="space-y-3">
+      <div class="mx-auto w-full max-w-3xl space-y-5">
         {#each messages as message (message.id)}
           <div class="group flex {message.role === 'user' ? 'justify-end' : 'justify-start'}">
             <div
-              class="max-w-[80%] rounded-lg px-3 py-2 text-sm leading-relaxed {message.role ===
-              'user'
-                ? 'bg-accent text-white'
-                : 'bg-panel'}"
+              class="{message.role === 'user'
+                ? 'max-w-[80%] rounded-2xl rounded-br-md bg-accent px-4 py-2.5 text-sm leading-relaxed text-white'
+                : 'min-w-0 flex-1 py-0.5 text-sm leading-relaxed'}"
             >
               {#if message.attachments?.length}
                 <div class="mb-2 flex flex-wrap gap-2">
@@ -370,7 +369,10 @@
               {/if}
             </div>
             <div
-              class="ml-1 flex shrink-0 items-start gap-0.5 self-start opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+              class="flex shrink-0 items-start gap-0.5 self-start opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 {message.role ===
+              'user'
+                ? 'order-first mr-1'
+                : 'ml-1'}"
             >
               {#if message.content}
                 <button
@@ -409,7 +411,7 @@
 
         {#if streaming}
           <div class="flex justify-start">
-            <div class="max-w-[80%] rounded-lg bg-panel px-3 py-2 text-sm leading-relaxed">
+            <div class="min-w-0 flex-1 py-0.5 text-sm leading-relaxed">
               {#if streamText}
                 <Markdown content={streamText} />
               {:else}
@@ -426,7 +428,7 @@
 
     {#if error}
       <div
-        class="mt-3 flex items-start justify-between gap-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-500"
+        class="mx-auto mt-3 flex w-full max-w-3xl items-start justify-between gap-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-500"
       >
         <span class="min-w-0 whitespace-pre-wrap">{error}</span>
         {#if canRetry}
@@ -492,7 +494,7 @@
     {/if}
 
     <div
-      class="flex items-end gap-2 rounded-lg border border-line bg-panel px-3 py-2"
+      class="flex items-end gap-2 rounded-xl border border-line bg-panel px-3 py-2 transition-colors focus-within:border-accent/60"
       role="group"
       aria-label="Message composer"
       ondragover={handleDragOver}
@@ -508,7 +510,7 @@
       />
       <button
         type="button"
-        class="rounded-md p-1.5 text-muted transition-colors hover:text-fg disabled:opacity-40"
+        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:text-fg disabled:opacity-40"
         title={editing ? 'Attachments are kept when editing' : 'Attach files'}
         disabled={streaming || !!editing}
         onclick={() => fileInput?.click()}
@@ -521,12 +523,12 @@
         onkeydown={handleKeydown}
         rows="1"
         placeholder={editing ? 'Edit message…' : 'Send a message…'}
-        class="max-h-40 flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted"
+        class="max-h-40 flex-1 resize-none bg-transparent py-1.5 text-sm leading-5 outline-none placeholder:text-muted"
       ></textarea>
       {#if streaming}
         <button
           type="button"
-          class="rounded-md bg-accent p-1.5 text-white transition-opacity"
+          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-accent text-white transition-opacity"
           title="Stop generating"
           onclick={oncancel}
         >
@@ -534,7 +536,7 @@
         </button>
       {:else}
         <button
-          class="rounded-md bg-accent p-1.5 text-white transition-opacity disabled:opacity-40"
+          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-accent text-white transition-opacity disabled:opacity-40"
           title="Send"
           disabled={editing ? !draft.trim() : !draft.trim() && files.length === 0}
           onclick={submit}

@@ -5,6 +5,7 @@
   import SearchPalette from './lib/components/SearchPalette.svelte'
   import SettingsModal from './lib/components/SettingsModal.svelte'
   import { chat } from './lib/stores/chat.svelte'
+  import { disableTextAssist } from './lib/disable-autosuggest'
 
   let settingsOpen = $state(false)
   let searchOpen = $state(false)
@@ -13,10 +14,14 @@
   const activeThread = $derived(chat.activeThread)
 
   onMount(() => {
+    const stopTextAssist = disableTextAssist()
     chat.init().catch((err) => {
       chat.error = err instanceof Error ? err.message : String(err)
     })
-    return () => chat.destroy()
+    return () => {
+      stopTextAssist()
+      chat.destroy()
+    }
   })
 
   function handleKeydown(event: KeyboardEvent): void {
