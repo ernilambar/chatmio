@@ -13,26 +13,34 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// Nullable thread generation settings mean the provider default; they are left
+// out of the request.
 const schema = `
 CREATE TABLE IF NOT EXISTS threads (
 	id                TEXT PRIMARY KEY,
 	title             TEXT    NOT NULL DEFAULT 'New chat',
 	model             TEXT    NOT NULL DEFAULT '',
 	system_prompt     TEXT    NOT NULL DEFAULT '',
-	temperature       REAL    NOT NULL DEFAULT 0.7,
-	top_p             REAL    NOT NULL DEFAULT 1.0,
-	max_tokens        INTEGER NOT NULL DEFAULT 2048,
-	frequency_penalty REAL    NOT NULL DEFAULT 0.0,
+	temperature       REAL,
+	top_p             REAL,
+	max_tokens        INTEGER,
+	frequency_penalty REAL,
+	reasoning_effort  TEXT    NOT NULL DEFAULT '',
+	context_window    INTEGER,
 	created_at        INTEGER NOT NULL,
 	updated_at        INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS messages (
-	id         TEXT PRIMARY KEY,
-	thread_id  TEXT    NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
-	role       TEXT    NOT NULL CHECK (role IN ('system', 'user', 'assistant')),
-	content    TEXT    NOT NULL,
-	created_at INTEGER NOT NULL
+	id                TEXT PRIMARY KEY,
+	thread_id         TEXT    NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+	role              TEXT    NOT NULL CHECK (role IN ('system', 'user', 'assistant')),
+	content           TEXT    NOT NULL,
+	reasoning         TEXT    NOT NULL DEFAULT '',
+	prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+	completion_tokens INTEGER NOT NULL DEFAULT 0,
+	reasoning_tokens  INTEGER NOT NULL DEFAULT 0,
+	created_at        INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS attachments (
@@ -52,28 +60,47 @@ CREATE INDEX IF NOT EXISTS idx_attachments_message
 	ON attachments (message_id, created_at);
 `
 
-// Thread is a persisted conversation.
+// Thread is a persisted conversation. Nil generation settings use the
+// provider default.
 type Thread struct {
-	ID               string  `json:"id"`
-	Title            string  `json:"title"`
-	Model            string  `json:"model"`
-	SystemPrompt     string  `json:"systemPrompt"`
-	Temperature      float64 `json:"temperature"`
-	TopP             float64 `json:"topP"`
-	MaxTokens        int     `json:"maxTokens"`
-	FrequencyPenalty float64 `json:"frequencyPenalty"`
-	CreatedAt        int64   `json:"createdAt"`
-	UpdatedAt        int64   `json:"updatedAt"`
+	ID               string   `json:"id"`
+	Title            string   `json:"title"`
+	Model            string   `json:"model"`
+	SystemPrompt     string   `json:"systemPrompt"`
+	Temperature      *float64 `json:"temperature,omitempty"`
+	TopP             *float64 `json:"topP,omitempty"`
+	MaxTokens        *int     `json:"maxTokens,omitempty"`
+	FrequencyPenalty *float64 `json:"frequencyPenalty,omitempty"`
+	ReasoningEffort  string   `json:"reasoningEffort"`
+	ContextWindow    *int     `json:"contextWindow,omitempty"`
+	CreatedAt        int64    `json:"createdAt"`
+	UpdatedAt        int64    `json:"updatedAt"`
 }
 
-// Message is a persisted chat message.
+// ThreadSettings are the per-chat generation settings the user can edit.
+type ThreadSettings struct {
+	SystemPrompt     string   `json:"systemPrompt"`
+	Temperature      *float64 `json:"temperature,omitempty"`
+	TopP             *float64 `json:"topP,omitempty"`
+	MaxTokens        *int     `json:"maxTokens,omitempty"`
+	FrequencyPenalty *float64 `json:"frequencyPenalty,omitempty"`
+	ReasoningEffort  string   `json:"reasoningEffort"`
+	ContextWindow    *int     `json:"contextWindow,omitempty"`
+}
+
+// Message is a persisted chat message. Token counts are zero when the
+// provider did not report usage.
 type Message struct {
-	ID          string       `json:"id"`
-	ThreadID    string       `json:"threadId"`
-	Role        string       `json:"role"`
-	Content     string       `json:"content"`
-	Attachments []Attachment `json:"attachments,omitempty"`
-	CreatedAt   int64        `json:"createdAt"`
+	ID               string       `json:"id"`
+	ThreadID         string       `json:"threadId"`
+	Role             string       `json:"role"`
+	Content          string       `json:"content"`
+	Reasoning        string       `json:"reasoning"`
+	PromptTokens     int          `json:"promptTokens"`
+	CompletionTokens int          `json:"completionTokens"`
+	ReasoningTokens  int          `json:"reasoningTokens"`
+	Attachments      []Attachment `json:"attachments,omitempty"`
+	CreatedAt        int64        `json:"createdAt"`
 }
 
 // Attachment is a file stored alongside a user message.
@@ -124,51 +151,9 @@ func Open(path string) (*Store, error) {
 
 	if _, err := sqlDB.Exec(schema); err != nil {
 		sqlDB.Close()
-		return nil, fmt.Errorf("db: migrate: %w", err)
+		return nil, fmt.Errorf("db: apply schema: %w", err)
 	}
-	if err := ensureColumn(sqlDB, "threads", "model", "TEXT NOT NULL DEFAULT ''"); err != nil {
-		sqlDB.Close()
-		return nil, fmt.Errorf("db: migrate threads.model: %w", err)
-	}
-
 	return &Store{db: sqlDB}, nil
-}
-
-// ensureColumn adds column when an existing table predates it.
-func ensureColumn(sqlDB *sql.DB, table, column, definition string) error {
-	rows, err := sqlDB.Query("PRAGMA table_info(" + table + ")")
-	if err != nil {
-		return err
-	}
-	found := false
-	for rows.Next() {
-		var (
-			cid        int
-			name       string
-			ctype      string
-			notnull    int
-			defaultV   any
-			primaryKey int
-		)
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &defaultV, &primaryKey); err != nil {
-			rows.Close()
-			return err
-		}
-		if name == column {
-			found = true
-		}
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if found {
-		return nil
-	}
-	_, err = sqlDB.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition)
-	return err
 }
 
 // Close releases the database connection.
@@ -179,15 +164,32 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+const threadColumns = `id, title, model, system_prompt, temperature, top_p,
+	max_tokens, frequency_penalty, reasoning_effort, context_window,
+	created_at, updated_at`
+
+type scanner interface {
+	Scan(dest ...any) error
+}
+
+func scanThread(row scanner) (Thread, error) {
+	var t Thread
+	err := row.Scan(
+		&t.ID, &t.Title, &t.Model, &t.SystemPrompt, &t.Temperature, &t.TopP,
+		&t.MaxTokens, &t.FrequencyPenalty, &t.ReasoningEffort, &t.ContextWindow,
+		&t.CreatedAt, &t.UpdatedAt,
+	)
+	return t, err
+}
+
 // CreateThread inserts a thread.
 func (s *Store) CreateThread(t Thread) error {
 	_, err := s.db.Exec(`
-		INSERT INTO threads (
-			id, title, model, system_prompt, temperature, top_p,
-			max_tokens, frequency_penalty, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO threads (`+threadColumns+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.ID, t.Title, t.Model, t.SystemPrompt, t.Temperature, t.TopP,
-		t.MaxTokens, t.FrequencyPenalty, t.CreatedAt, t.UpdatedAt)
+		t.MaxTokens, t.FrequencyPenalty, t.ReasoningEffort, t.ContextWindow,
+		t.CreatedAt, t.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("db: create thread: %w", err)
 	}
@@ -196,11 +198,7 @@ func (s *Store) CreateThread(t Thread) error {
 
 // ListThreads returns threads ordered by most recently updated.
 func (s *Store) ListThreads() ([]Thread, error) {
-	rows, err := s.db.Query(`
-		SELECT id, title, model, system_prompt, temperature, top_p,
-		       max_tokens, frequency_penalty, created_at, updated_at
-		FROM threads
-		ORDER BY updated_at DESC`)
+	rows, err := s.db.Query(`SELECT ` + threadColumns + ` FROM threads ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("db: list threads: %w", err)
 	}
@@ -208,11 +206,8 @@ func (s *Store) ListThreads() ([]Thread, error) {
 
 	threads := []Thread{}
 	for rows.Next() {
-		var t Thread
-		if err := rows.Scan(
-			&t.ID, &t.Title, &t.Model, &t.SystemPrompt, &t.Temperature, &t.TopP,
-			&t.MaxTokens, &t.FrequencyPenalty, &t.CreatedAt, &t.UpdatedAt,
-		); err != nil {
+		t, err := scanThread(rows)
+		if err != nil {
 			return nil, fmt.Errorf("db: scan thread: %w", err)
 		}
 		threads = append(threads, t)
@@ -346,13 +341,7 @@ func escapeLike(value string) string {
 
 // GetThread returns a single thread.
 func (s *Store) GetThread(id string) (Thread, error) {
-	var t Thread
-	err := s.db.QueryRow(`
-		SELECT id, title, model, system_prompt, temperature, top_p,
-		       max_tokens, frequency_penalty, created_at, updated_at
-		FROM threads WHERE id = ?`, id).Scan(
-		&t.ID, &t.Title, &t.Model, &t.SystemPrompt, &t.Temperature, &t.TopP,
-		&t.MaxTokens, &t.FrequencyPenalty, &t.CreatedAt, &t.UpdatedAt)
+	t, err := scanThread(s.db.QueryRow(`SELECT `+threadColumns+` FROM threads WHERE id = ?`, id))
 	if err != nil {
 		return Thread{}, fmt.Errorf("db: get thread: %w", err)
 	}
@@ -405,6 +394,21 @@ func (s *Store) SetThreadModel(id, model string) error {
 	return nil
 }
 
+// SetThreadSettings replaces a thread's system prompt and generation settings.
+func (s *Store) SetThreadSettings(id string, settings ThreadSettings) error {
+	_, err := s.db.Exec(`
+		UPDATE threads SET
+			system_prompt = ?, temperature = ?, top_p = ?, max_tokens = ?,
+			frequency_penalty = ?, reasoning_effort = ?, context_window = ?
+		WHERE id = ?`,
+		settings.SystemPrompt, settings.Temperature, settings.TopP, settings.MaxTokens,
+		settings.FrequencyPenalty, settings.ReasoningEffort, settings.ContextWindow, id)
+	if err != nil {
+		return fmt.Errorf("db: set thread settings: %w", err)
+	}
+	return nil
+}
+
 // DeleteThread removes a thread and its messages and attachments.
 func (s *Store) DeleteThread(id string) error {
 	_, err := s.db.Exec(`DELETE FROM threads WHERE id = ?`, id)
@@ -423,9 +427,12 @@ func (s *Store) AddMessage(m Message) error {
 	defer tx.Rollback()
 
 	if _, err := tx.Exec(
-		`INSERT INTO messages (id, thread_id, role, content, created_at)
-		 VALUES (?, ?, ?, ?, ?)`,
-		m.ID, m.ThreadID, m.Role, m.Content, m.CreatedAt); err != nil {
+		`INSERT INTO messages (
+			id, thread_id, role, content, reasoning,
+			prompt_tokens, completion_tokens, reasoning_tokens, created_at
+		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.ThreadID, m.Role, m.Content, m.Reasoning,
+		m.PromptTokens, m.CompletionTokens, m.ReasoningTokens, m.CreatedAt); err != nil {
 		return fmt.Errorf("db: add message: %w", err)
 	}
 
@@ -485,7 +492,8 @@ func (s *Store) DeleteMessagesAfter(threadID, messageID string) error {
 // ListMessages returns a thread's messages in chronological order.
 func (s *Store) ListMessages(threadID string) ([]Message, error) {
 	rows, err := s.db.Query(`
-		SELECT id, thread_id, role, content, created_at
+		SELECT id, thread_id, role, content, reasoning,
+		       prompt_tokens, completion_tokens, reasoning_tokens, created_at
 		FROM messages
 		WHERE thread_id = ?
 		ORDER BY created_at, rowid`, threadID)
@@ -496,7 +504,10 @@ func (s *Store) ListMessages(threadID string) ([]Message, error) {
 	messages := []Message{}
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.ThreadID, &m.Role, &m.Content, &m.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&m.ID, &m.ThreadID, &m.Role, &m.Content, &m.Reasoning,
+			&m.PromptTokens, &m.CompletionTokens, &m.ReasoningTokens, &m.CreatedAt,
+		); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("db: scan message: %w", err)
 		}

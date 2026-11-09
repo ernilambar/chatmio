@@ -33,3 +33,5 @@ export function SearchThreads(arg1:string):Promise<Array<db.SearchResult>>;
 export function SendMessage(arg1:string,arg2:string,arg3:Array<db.AttachmentInput>):Promise<void>;
 
 export function SetThreadModel(arg1:string,arg2:string):Promise<void>;
+
+export function SetThreadSettings(arg1:string,arg2:db.ThreadSettings):Promise<void>;

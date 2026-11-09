@@ -10,6 +10,7 @@
     Pencil,
     RotateCcw,
     Send,
+    SlidersHorizontal,
     Square,
     Trash2,
     X
@@ -18,12 +19,14 @@
   import type { db } from '../wailsjs/go/models'
   import { copyText } from '../clipboard'
   import Markdown from './Markdown.svelte'
+  import { formatTokens, splitThinking } from '../reasoning'
 
   let {
     thread,
     messages,
     streaming,
     streamText,
+    streamReasoning,
     error,
     models,
     defaultModel,
@@ -36,6 +39,9 @@
     ondelete,
     onmodelchange,
     oncancel,
+    onopensettings,
+    contextUsed = 0,
+    contextWindow = 0,
     focusNonce = 0,
     sidebarHidden = false,
     onshowsidebar
@@ -44,6 +50,7 @@
     messages: db.Message[]
     streaming: boolean
     streamText: string
+    streamReasoning: string
     error: string | null
     models: string[]
     defaultModel: string
@@ -56,6 +63,9 @@
     ondelete: (threadId: string) => Promise<void> | void
     onmodelchange: (model: string) => Promise<void> | void
     oncancel: () => void
+    onopensettings: () => void
+    contextUsed?: number
+    contextWindow?: number
     focusNonce?: number
     sidebarHidden?: boolean
     onshowsidebar?: () => void
@@ -85,6 +95,28 @@
     if (selectedModel) values.add(selectedModel)
     return [...values]
   })
+
+  const streamParts = $derived(splitThinking(streamText, streamReasoning))
+  const contextRatio = $derived(contextWindow > 0 ? contextUsed / contextWindow : 0)
+  const contextTone = $derived(
+    contextRatio >= 0.9 ? 'text-red-500' : contextRatio >= 0.75 ? 'text-amber-500' : ''
+  )
+
+  function messageParts(message: db.Message): { reasoning: string; content: string } {
+    if (message.role !== 'assistant') return { reasoning: '', content: message.content }
+    return splitThinking(message.content, message.reasoning)
+  }
+
+  function usageTitle(message: db.Message): string {
+    const lines = [
+      `Input: ${message.promptTokens.toLocaleString()} tokens`,
+      `Output: ${message.completionTokens.toLocaleString()} tokens`
+    ]
+    if (message.reasoningTokens > 0) {
+      lines.push(`Reasoning: ${message.reasoningTokens.toLocaleString()} tokens (part of output)`)
+    }
+    return lines.join('\n')
+  }
 
   let lastThreadId: string | null | undefined = undefined
 
@@ -238,8 +270,9 @@
   }
 
   async function copyMessage(message: db.Message): Promise<void> {
-    if (!message.content) return
-    await copyText(message.content)
+    const text = messageParts(message).content
+    if (!text) return
+    await copyText(text)
     copiedId = message.id
     if (copyTimer) clearTimeout(copyTimer)
     copyTimer = setTimeout(() => {
@@ -299,11 +332,29 @@
             {/each}
           </select>
         {/if}
+        {#if contextUsed > 0}
+          <span>·</span>
+          <span
+            class={contextTone}
+            title="Tokens used by the latest exchange{contextWindow
+              ? ` of a ${contextWindow.toLocaleString()}-token context window`
+              : '. Set a context window in chat settings to get a warning.'}"
+          >
+            {formatTokens(contextUsed)}{contextWindow ? ` / ${formatTokens(contextWindow)}` : ''} tokens
+          </span>
+        {/if}
       </div>
     </div>
 
     {#if thread}
       <div class="flex items-center gap-1">
+        <button
+          class="rounded-md p-1.5 text-muted hover:bg-panel hover:text-fg"
+          title="Chat settings"
+          onclick={onopensettings}
+        >
+          <SlidersHorizontal size={15} />
+        </button>
         <button
           class="rounded-md p-1.5 text-muted hover:bg-panel hover:text-fg"
           title="Rename chat"
@@ -353,6 +404,7 @@
     {:else}
       <div class="mx-auto w-full max-w-3xl space-y-5">
         {#each messages as message (message.id)}
+          {@const parts = messageParts(message)}
           <div
             class="group flex flex-col {message.role === 'user' ? 'items-end' : 'items-start'}"
           >
@@ -380,8 +432,16 @@
                   {/each}
                 </div>
               {/if}
-              {#if message.content}
-                <Markdown content={message.content} />
+              {#if parts.reasoning}
+                <details class="mb-2 text-xs text-muted">
+                  <summary class="cursor-pointer select-none">Thoughts</summary>
+                  <div class="mt-1 whitespace-pre-wrap border-l-2 border-line pl-3 leading-relaxed">
+                    {parts.reasoning}
+                  </div>
+                </details>
+              {/if}
+              {#if parts.content}
+                <Markdown content={parts.content} />
               {/if}
               <div
                 class="mt-1 flex items-center gap-0.5 opacity-60 transition-opacity group-hover:opacity-100 focus-within:opacity-100 {message.role ===
@@ -389,7 +449,7 @@
                   ? 'justify-end'
                   : ''}"
               >
-              {#if message.content}
+              {#if parts.content}
                 <button
                   class="rounded-md p-1 text-muted transition-colors hover:text-fg"
                   title="Copy message"
@@ -420,6 +480,11 @@
                   <RotateCcw size={13} />
                 </button>
               {/if}
+              {#if message.role === 'assistant' && (message.promptTokens > 0 || message.completionTokens > 0)}
+                <span class="ml-1 text-[11px] text-muted" title={usageTitle(message)}>
+                  {formatTokens(message.promptTokens)} in · {formatTokens(message.completionTokens)} out
+                </span>
+              {/if}
               </div>
             </div>
           </div>
@@ -428,9 +493,19 @@
         {#if streaming}
           <div class="flex justify-start">
             <div class="min-w-0 flex-1 py-0.5 text-sm leading-relaxed">
-              {#if streamText}
-                <Markdown content={streamText} />
-              {:else}
+              {#if streamParts.reasoning}
+                <details class="mb-2 text-xs text-muted" open={!streamParts.content}>
+                  <summary class="cursor-pointer select-none">
+                    {streamParts.content ? 'Thoughts' : 'Thinking…'}
+                  </summary>
+                  <div class="mt-1 whitespace-pre-wrap border-l-2 border-line pl-3 leading-relaxed">
+                    {streamParts.reasoning}
+                  </div>
+                </details>
+              {/if}
+              {#if streamParts.content}
+                <Markdown content={streamParts.content} />
+              {:else if !streamParts.reasoning}
                 <div class="flex items-center gap-2 text-muted">
                   <Loader2 class="animate-spin" size={14} />
                   <span>Thinking…</span>
@@ -474,6 +549,12 @@
   </div>
 
   <div class="border-t border-line p-4">
+    {#if contextRatio >= 0.9}
+      <div class="mb-2 rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1 text-xs text-red-500">
+        Context is {Math.min(100, Math.round(contextRatio * 100))}% full. Replies may fail or drop
+        earlier messages; start a new chat.
+      </div>
+    {/if}
     {#if editing}
       <div
         class="mb-2 flex items-center justify-between gap-2 rounded-md border border-accent/40 bg-accent/5 px-2 py-1 text-xs text-muted"

@@ -6,6 +6,7 @@ export namespace config {
 	    chatModel: string;
 	    titleModel: string;
 	    systemPrompt: string;
+	    contextWindow: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -18,6 +19,7 @@ export namespace config {
 	        this.chatModel = source["chatModel"];
 	        this.titleModel = source["titleModel"];
 	        this.systemPrompt = source["systemPrompt"];
+	        this.contextWindow = source["contextWindow"];
 	    }
 	}
 
@@ -70,6 +72,10 @@ export namespace db {
 	    threadId: string;
 	    role: string;
 	    content: string;
+	    reasoning: string;
+	    promptTokens: number;
+	    completionTokens: number;
+	    reasoningTokens: number;
 	    attachments?: Attachment[];
 	    createdAt: number;
 	
@@ -83,6 +89,10 @@ export namespace db {
 	        this.threadId = source["threadId"];
 	        this.role = source["role"];
 	        this.content = source["content"];
+	        this.reasoning = source["reasoning"];
+	        this.promptTokens = source["promptTokens"];
+	        this.completionTokens = source["completionTokens"];
+	        this.reasoningTokens = source["reasoningTokens"];
 	        this.attachments = this.convertValues(source["attachments"], Attachment);
 	        this.createdAt = source["createdAt"];
 	    }
@@ -126,10 +136,12 @@ export namespace db {
 	    title: string;
 	    model: string;
 	    systemPrompt: string;
-	    temperature: number;
-	    topP: number;
-	    maxTokens: number;
-	    frequencyPenalty: number;
+	    temperature?: number;
+	    topP?: number;
+	    maxTokens?: number;
+	    frequencyPenalty?: number;
+	    reasoningEffort: string;
+	    contextWindow?: number;
 	    createdAt: number;
 	    updatedAt: number;
 	
@@ -147,8 +159,34 @@ export namespace db {
 	        this.topP = source["topP"];
 	        this.maxTokens = source["maxTokens"];
 	        this.frequencyPenalty = source["frequencyPenalty"];
+	        this.reasoningEffort = source["reasoningEffort"];
+	        this.contextWindow = source["contextWindow"];
 	        this.createdAt = source["createdAt"];
 	        this.updatedAt = source["updatedAt"];
+	    }
+	}
+	export class ThreadSettings {
+	    systemPrompt: string;
+	    temperature?: number;
+	    topP?: number;
+	    maxTokens?: number;
+	    frequencyPenalty?: number;
+	    reasoningEffort: string;
+	    contextWindow?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ThreadSettings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.systemPrompt = source["systemPrompt"];
+	        this.temperature = source["temperature"];
+	        this.topP = source["topP"];
+	        this.maxTokens = source["maxTokens"];
+	        this.frequencyPenalty = source["frequencyPenalty"];
+	        this.reasoningEffort = source["reasoningEffort"];
+	        this.contextWindow = source["contextWindow"];
 	    }
 	}
 

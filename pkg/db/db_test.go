@@ -197,3 +197,56 @@ func TestSearchThreadsMatchesTitleAndContent(t *testing.T) {
 		t.Fatalf("wildcard results = %+v, want only t3", results)
 	}
 }
+
+func TestSetThreadSettingsRoundTrip(t *testing.T) {
+	store := openTestStore(t)
+	if err := store.CreateThread(Thread{ID: "t1", Title: "New chat", CreatedAt: 1, UpdatedAt: 1}); err != nil {
+		t.Fatalf("CreateThread: %v", err)
+	}
+
+	temperature, maxTokens, window := 0.3, 8000, 128000
+	settings := ThreadSettings{
+		SystemPrompt:    "Be terse",
+		Temperature:     &temperature,
+		MaxTokens:       &maxTokens,
+		ReasoningEffort: "high",
+		ContextWindow:   &window,
+	}
+	if err := store.SetThreadSettings("t1", settings); err != nil {
+		t.Fatalf("SetThreadSettings: %v", err)
+	}
+
+	thread, err := store.GetThread("t1")
+	if err != nil {
+		t.Fatalf("GetThread: %v", err)
+	}
+	if thread.SystemPrompt != "Be terse" || thread.ReasoningEffort != "high" ||
+		thread.Temperature == nil || *thread.Temperature != temperature ||
+		thread.MaxTokens == nil || *thread.MaxTokens != maxTokens ||
+		thread.ContextWindow == nil || *thread.ContextWindow != window ||
+		thread.TopP != nil || thread.FrequencyPenalty != nil {
+		t.Fatalf("thread = %+v, want settings round-tripped", thread)
+	}
+}
+
+func TestMessageReasoningAndUsageRoundTrip(t *testing.T) {
+	store := openTestStore(t)
+	if err := store.CreateThread(Thread{ID: "t1", Title: "New chat", CreatedAt: 1, UpdatedAt: 1}); err != nil {
+		t.Fatalf("CreateThread: %v", err)
+	}
+	want := Message{
+		ID: "m1", ThreadID: "t1", Role: "assistant", Content: "answer", Reasoning: "thoughts",
+		PromptTokens: 10, CompletionTokens: 20, ReasoningTokens: 5, CreatedAt: 2,
+	}
+	if err := store.AddMessage(want); err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+	messages, err := store.ListMessages("t1")
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	got := messages[0]
+	if got.Reasoning != want.Reasoning || got.PromptTokens != 10 || got.CompletionTokens != 20 || got.ReasoningTokens != 5 {
+		t.Fatalf("message = %+v, want reasoning and usage kept", got)
+	}
+}

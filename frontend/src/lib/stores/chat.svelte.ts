@@ -11,7 +11,8 @@ import {
   RenameThread,
   SaveConfig,
   SendMessage,
-  SetThreadModel
+  SetThreadModel,
+  SetThreadSettings
 } from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 import { config, db } from '../wailsjs/go/models'
@@ -19,6 +20,7 @@ import { config, db } from '../wailsjs/go/models'
 interface ChatDelta {
   threadId: string
   delta: string
+  reasoning: string
 }
 
 interface ChatDone {
@@ -81,6 +83,7 @@ class ChatStore {
   activeId = $state<string | null>(null)
   streaming = $state(false)
   streamText = $state('')
+  streamReasoning = $state('')
   error = $state<string | null>(null)
 
   private unsubscribers: Array<() => void> = []
@@ -98,6 +101,24 @@ class ChatStore {
 
   get activeModel(): string {
     return this.activeThread?.model || this.config?.chatModel || ''
+  }
+
+  // contextWindow is the chat's own window, else the global default; 0 means
+  // no warning.
+  get contextWindow(): number {
+    return this.activeThread?.contextWindow || this.config?.contextWindow || 0
+  }
+
+  // contextUsed is the token count of the latest reply's full exchange, which
+  // approximates how much of the window the chat occupies.
+  get contextUsed(): number {
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      const message = this.messages[i]
+      if (message.role === 'assistant' && message.promptTokens > 0) {
+        return message.promptTokens + message.completionTokens
+      }
+    }
+    return 0
   }
 
   async init(): Promise<void> {
@@ -125,10 +146,12 @@ class ChatStore {
       EventsOn('chat:delta', (payload: ChatDelta) => {
         if (payload.threadId !== this.activeId) return
         this.streamText += payload.delta
+        this.streamReasoning += payload.reasoning
       }),
       EventsOn('chat:done', async (payload: ChatDone) => {
         if (payload.threadId !== this.activeId) return
         this.streamText = ''
+        this.streamReasoning = ''
         this.messages = await GetMessages(payload.threadId)
         this.threads = await ListThreads()
       }),
@@ -173,6 +196,7 @@ class ChatStore {
     this.activeId = id
     this.error = null
     this.streamText = ''
+    this.streamReasoning = ''
     this.failedSend = null
     this.messages = await GetMessages(id)
   }
@@ -185,6 +209,7 @@ class ChatStore {
     this.streaming = true
     this.error = null
     this.streamText = ''
+    this.streamReasoning = ''
     this.failedSend = null
 
     let attachments: db.AttachmentInput[]
@@ -231,6 +256,7 @@ class ChatStore {
       this.error = err instanceof Error ? err.message : String(err)
       this.failedSend = { content, files }
       this.streamText = ''
+      this.streamReasoning = ''
       this.messages = await GetMessages(threadId)
     } finally {
       this.streaming = false
@@ -271,6 +297,7 @@ class ChatStore {
     this.streaming = true
     this.error = null
     this.streamText = ''
+    this.streamReasoning = ''
 
     const messages = [...this.messages]
     while (messages.length > 0 && messages[messages.length - 1].role === 'assistant') {
@@ -286,6 +313,7 @@ class ChatStore {
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err)
       this.streamText = ''
+      this.streamReasoning = ''
       this.messages = await GetMessages(threadId)
     } finally {
       this.streaming = false
@@ -302,6 +330,7 @@ class ChatStore {
     this.streaming = true
     this.error = null
     this.streamText = ''
+    this.streamReasoning = ''
 
     const index = this.messages.findIndex((message) => message.id === messageId)
     if (index >= 0) {
@@ -318,6 +347,7 @@ class ChatStore {
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err)
       this.streamText = ''
+      this.streamReasoning = ''
       this.messages = await GetMessages(threadId)
     } finally {
       this.streaming = false
@@ -341,6 +371,15 @@ class ChatStore {
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err)
     }
+  }
+
+  async setThreadSettings(settings: db.ThreadSettings): Promise<void> {
+    if (!this.activeId) return
+    const threadId = this.activeId
+    await SetThreadSettings(threadId, settings)
+    this.threads = this.threads.map((thread) =>
+      thread.id === threadId ? db.Thread.createFrom({ ...thread, ...settings }) : thread
+    )
   }
 
   async renameThread(threadId: string, title: string): Promise<void> {
@@ -367,6 +406,7 @@ class ChatStore {
       this.activeId = null
       this.messages = []
       this.streamText = ''
+      this.streamReasoning = ''
       const next = this.threads[0]
       if (next) {
         await this.select(next.id)

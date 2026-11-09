@@ -22,6 +22,7 @@
   let chatModel = $state('')
   let titleModel = $state('')
   let systemPrompt = $state('')
+  let contextWindow = $state<number | null>(null)
   let models = $state<string[]>([])
   let modelsLoading = $state(false)
   let modelsError = $state<string | null>(null)
@@ -42,6 +43,7 @@
       chatModel = cfg.chatModel
       titleModel = cfg.titleModel
       systemPrompt = cfg.systemPrompt
+      contextWindow = cfg.contextWindow || null
       error = null
       untrack(() => void loadModels())
     }
@@ -81,7 +83,14 @@
     error = null
     try {
       await onsave(
-        config.Config.createFrom({ baseUrl, apiKey, chatModel, titleModel, systemPrompt })
+        config.Config.createFrom({
+          baseUrl,
+          apiKey,
+          chatModel,
+          titleModel,
+          systemPrompt,
+          contextWindow: contextWindow && contextWindow > 0 ? Math.floor(contextWindow) : 0
+        })
       )
       onclose()
     } catch (err) {
@@ -104,7 +113,7 @@
 {#if open}
   <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
     <form
-      class="w-full max-w-md rounded-lg border border-line bg-surface p-5 shadow-xl"
+      class="max-h-full w-full max-w-md overflow-y-auto rounded-lg border border-line bg-surface p-5 shadow-xl"
       onsubmit={submit}
     >
       <div class="mb-4 flex items-center justify-between">
@@ -198,6 +207,19 @@
             class="w-full resize-none rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
             placeholder="Optional instructions for the assistant"
           ></textarea>
+        </label>
+
+        <label class="block space-y-1">
+          <span class="text-xs text-muted">Context window (tokens)</span>
+          <input
+            bind:value={contextWindow}
+            type="number"
+            min="1"
+            step="1"
+            class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+            placeholder="128000"
+          />
+          <span class="text-[11px] text-muted">Used for the context warning. Chats can override it.</span>
         </label>
       </div>
 

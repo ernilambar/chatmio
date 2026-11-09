@@ -5,6 +5,7 @@
   import SearchPalette from './lib/components/SearchPalette.svelte'
   import SettingsModal from './lib/components/SettingsModal.svelte'
   import AboutModal from './lib/components/AboutModal.svelte'
+  import ChatSettingsModal from './lib/components/ChatSettingsModal.svelte'
   import { EventsOn } from './lib/wailsjs/runtime/runtime'
   import { chat } from './lib/stores/chat.svelte'
   import { disableTextAssist } from './lib/disable-autosuggest'
@@ -22,6 +23,7 @@
   let settingsOpen = $state(false)
   let searchOpen = $state(false)
   let aboutOpen = $state(false)
+  let chatSettingsOpen = $state(false)
   let composerFocus = $state(0)
   let sidebarOpen = $state(readSidebarVisible())
 
@@ -86,6 +88,7 @@
       !settingsOpen &&
       !searchOpen &&
       !aboutOpen &&
+      !chatSettingsOpen &&
       chat.streaming
     ) {
       void chat.cancel()
@@ -112,6 +115,9 @@
     messages={chat.messages}
     streaming={chat.streaming}
     streamText={chat.streamText}
+    streamReasoning={chat.streamReasoning}
+    contextUsed={chat.contextUsed}
+    contextWindow={chat.contextWindow}
     error={chat.error}
     models={chat.models}
     defaultModel={chat.config?.chatModel ?? ''}
@@ -126,6 +132,7 @@
     ondelete={(id) => chat.deleteThread(id)}
     onmodelchange={(model) => chat.setThreadModel(model)}
     oncancel={() => void chat.cancel()}
+    onopensettings={() => (chatSettingsOpen = true)}
     focusNonce={composerFocus}
   />
 </div>
@@ -142,6 +149,15 @@
   cfg={chat.config}
   onclose={() => (settingsOpen = false)}
   onsave={(next) => chat.saveConfig(next)}
+/>
+
+<ChatSettingsModal
+  open={chatSettingsOpen}
+  thread={activeThread}
+  globalSystemPrompt={chat.config?.systemPrompt ?? ''}
+  globalContextWindow={chat.config?.contextWindow ?? 0}
+  onclose={() => (chatSettingsOpen = false)}
+  onsave={(settings) => chat.setThreadSettings(settings)}
 />
 
 <AboutModal open={aboutOpen} onclose={() => (aboutOpen = false)} />

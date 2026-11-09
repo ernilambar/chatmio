@@ -50,6 +50,8 @@ npm --prefix frontend run check          # typecheck Svelte/TypeScript
   stores or a second styling system.
 - Persistence is backend-only: config through `pkg/config`, chats and messages through `pkg/db`.
   The frontend must call Wails bindings instead of touching files or SQLite.
+- Pre-release: no config or database migrations. Change the schema in place; developers delete
+  `chats.db` / `config.json` after a breaking change. Do not add backward-compatibility code.
 - Keep the app macOS arm64 only. Do not add Intel, universal, or non-macOS build paths.
 
 ## Quality gate

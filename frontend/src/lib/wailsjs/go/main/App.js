@@ -61,3 +61,7 @@ export function SendMessage(arg1, arg2, arg3) {
 export function SetThreadModel(arg1, arg2) {
   return window['go']['main']['App']['SetThreadModel'](arg1, arg2);
 }
+
+export function SetThreadSettings(arg1, arg2) {
+  return window['go']['main']['App']['SetThreadSettings'](arg1, arg2);
+}

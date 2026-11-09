@@ -25,9 +25,6 @@ import (
 
 const (
 	defaultThreadTitle     = "New chat"
-	defaultTemperature     = 0.7
-	defaultTopP            = 1.0
-	defaultMaxTokens       = 2048
 	titleTemperature       = 0.2
 	titleMaxTokens         = 512
 	titleTimeout           = 30 * time.Second
@@ -117,6 +114,9 @@ func (a *App) SaveConfig(cfg config.Config) error {
 	if strings.TrimSpace(cfg.ChatModel) == "" {
 		return errors.New("chat model is required")
 	}
+	if cfg.ContextWindow < 0 {
+		return errors.New("context window must be zero or more")
+	}
 	return a.config.Save(cfg)
 }
 
@@ -148,15 +148,11 @@ func (a *App) CreateThread() (db.Thread, error) {
 	}
 	now := time.Now().UnixMilli()
 	thread := db.Thread{
-		ID:               uuid.NewString(),
-		Title:            defaultThreadTitle,
-		Model:            strings.TrimSpace(cfg.ChatModel),
-		Temperature:      defaultTemperature,
-		TopP:             defaultTopP,
-		MaxTokens:        defaultMaxTokens,
-		FrequencyPenalty: 0,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		ID:        uuid.NewString(),
+		Title:     defaultThreadTitle,
+		Model:     strings.TrimSpace(cfg.ChatModel),
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 	if err := a.store.CreateThread(thread); err != nil {
 		return db.Thread{}, err
@@ -194,6 +190,44 @@ func (a *App) SetThreadModel(threadID, model string) error {
 		return errors.New("model is required")
 	}
 	return a.store.SetThreadModel(threadID, model)
+}
+
+// SetThreadSettings changes one thread's system prompt and generation
+// settings. Nil values use the provider default.
+func (a *App) SetThreadSettings(threadID string, settings db.ThreadSettings) error {
+	if a.store == nil {
+		return errors.New("database unavailable")
+	}
+	settings.SystemPrompt = strings.TrimSpace(settings.SystemPrompt)
+	settings.ReasoningEffort = strings.TrimSpace(settings.ReasoningEffort)
+	if err := validateThreadSettings(settings); err != nil {
+		return err
+	}
+	return a.store.SetThreadSettings(threadID, settings)
+}
+
+func validateThreadSettings(s db.ThreadSettings) error {
+	if s.Temperature != nil && (*s.Temperature < 0 || *s.Temperature > 2) {
+		return errors.New("temperature must be between 0 and 2")
+	}
+	if s.TopP != nil && (*s.TopP <= 0 || *s.TopP > 1) {
+		return errors.New("top P must be greater than 0 and at most 1")
+	}
+	if s.MaxTokens != nil && *s.MaxTokens < 1 {
+		return errors.New("max tokens must be at least 1")
+	}
+	if s.FrequencyPenalty != nil && (*s.FrequencyPenalty < -2 || *s.FrequencyPenalty > 2) {
+		return errors.New("frequency penalty must be between -2 and 2")
+	}
+	if s.ContextWindow != nil && *s.ContextWindow < 1 {
+		return errors.New("context window must be at least 1")
+	}
+	switch s.ReasoningEffort {
+	case "", "low", "medium", "high":
+	default:
+		return fmt.Errorf("unsupported reasoning effort %q", s.ReasoningEffort)
+	}
+	return nil
 }
 
 // RenameThread sets a user-provided title.
@@ -430,19 +464,22 @@ func (a *App) streamReply(thread db.Thread, cfg config.Config, model string) err
 	a.setStreamCancel(cancel)
 	defer a.clearStreamCancel()
 
-	var reply strings.Builder
-	err = client.StreamChat(streamCtx, ai.ChatOptions{
+	var reply, reasoning strings.Builder
+	usage, err := client.StreamChat(streamCtx, ai.ChatOptions{
 		Model:            model,
 		Messages:         prompt,
-		Temperature:      &thread.Temperature,
-		TopP:             &thread.TopP,
-		MaxTokens:        &thread.MaxTokens,
-		FrequencyPenalty: &thread.FrequencyPenalty,
-	}, func(token string) {
-		reply.WriteString(token)
+		Temperature:      thread.Temperature,
+		TopP:             thread.TopP,
+		MaxTokens:        thread.MaxTokens,
+		FrequencyPenalty: thread.FrequencyPenalty,
+		ReasoningEffort:  thread.ReasoningEffort,
+	}, func(delta ai.Delta) {
+		reply.WriteString(delta.Content)
+		reasoning.WriteString(delta.Reasoning)
 		runtime.EventsEmit(a.ctx, "chat:delta", chatDelta{
-			ThreadID: thread.ID,
-			Delta:    token,
+			ThreadID:  thread.ID,
+			Delta:     delta.Content,
+			Reasoning: delta.Reasoning,
 		})
 	})
 
@@ -456,16 +493,20 @@ func (a *App) streamReply(thread db.Thread, cfg config.Config, model string) err
 			return err
 		}
 	}
-	if stopped && strings.TrimSpace(reply.String()) == "" {
+	if stopped && strings.TrimSpace(reply.String()) == "" && strings.TrimSpace(reasoning.String()) == "" {
 		return nil
 	}
 
 	assistantMessage := db.Message{
-		ID:        uuid.NewString(),
-		ThreadID:  thread.ID,
-		Role:      string(ai.RoleAssistant),
-		Content:   reply.String(),
-		CreatedAt: time.Now().UnixMilli(),
+		ID:               uuid.NewString(),
+		ThreadID:         thread.ID,
+		Role:             string(ai.RoleAssistant),
+		Content:          reply.String(),
+		Reasoning:        strings.TrimSpace(reasoning.String()),
+		PromptTokens:     usage.PromptTokens,
+		CompletionTokens: usage.CompletionTokens,
+		ReasoningTokens:  usage.ReasoningTokens,
+		CreatedAt:        time.Now().UnixMilli(),
 	}
 	if err := a.store.AddMessage(assistantMessage); err != nil {
 		return err
@@ -546,8 +587,9 @@ func (a *App) queueTitle(thread db.Thread, cfg config.Config, model, source stri
 }
 
 type chatDelta struct {
-	ThreadID string `json:"threadId"`
-	Delta    string `json:"delta"`
+	ThreadID  string `json:"threadId"`
+	Delta     string `json:"delta"`
+	Reasoning string `json:"reasoning"`
 }
 
 type chatDone struct {
@@ -741,7 +783,7 @@ func (a *App) streamTitle(client *ai.Client, model, content string) string {
 	ctx, cancel := context.WithTimeout(a.ctx, titleTimeout)
 	defer cancel()
 	var generated strings.Builder
-	err := client.StreamChat(ctx, ai.ChatOptions{
+	_, err := client.StreamChat(ctx, ai.ChatOptions{
 		Model: model,
 		Messages: []ai.Message{
 			{Role: ai.RoleSystem, Content: titlePrompt},
@@ -749,8 +791,8 @@ func (a *App) streamTitle(client *ai.Client, model, content string) string {
 		},
 		Temperature: &temperature,
 		MaxTokens:   &maxTokens,
-	}, func(token string) {
-		generated.WriteString(token)
+	}, func(delta ai.Delta) {
+		generated.WriteString(delta.Content)
 	})
 	if err != nil {
 		log.Printf("app: generate title with %s: %v", model, err)
