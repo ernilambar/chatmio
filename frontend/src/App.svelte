@@ -68,6 +68,11 @@
       composerFocus += 1
       return
     }
+    if (mod && key === 'b') {
+      event.preventDefault()
+      toggleSidebar()
+      return
+    }
     if (
       event.key === 'Escape' &&
       !event.defaultPrevented &&

@@ -259,7 +259,7 @@
     {#if sidebarHidden}
       <button
         class="-ml-2 shrink-0 rounded-md p-1 text-muted transition-colors hover:bg-panel hover:text-fg"
-        title="Show sidebar"
+        title="Show sidebar (⌘B)"
         onclick={() => onshowsidebar?.()}
       >
         <PanelLeft size={16} />

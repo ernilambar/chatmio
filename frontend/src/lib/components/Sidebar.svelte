@@ -27,7 +27,7 @@
     <div class="flex items-center gap-0.5">
       <button
         class="rounded-md p-1.5 text-muted transition-colors hover:bg-surface hover:text-fg"
-        title="Hide sidebar"
+        title="Hide sidebar (⌘B)"
         onclick={onhide}
       >
         <PanelLeftClose size={16} />
