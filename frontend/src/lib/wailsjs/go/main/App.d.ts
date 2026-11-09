@@ -3,6 +3,8 @@
 import {db} from '../models';
 import {config} from '../models';
 
+export function CancelReply():Promise<void>;
+
 export function CreateThread():Promise<db.Thread>;
 
 export function DeleteThread(arg1:string):Promise<void>;
@@ -22,6 +24,8 @@ export function RegenerateReply(arg1:string):Promise<void>;
 export function RenameThread(arg1:string,arg2:string):Promise<void>;
 
 export function SaveConfig(arg1:config.Config):Promise<void>;
+
+export function SearchThreads(arg1:string):Promise<Array<db.SearchResult>>;
 
 export function SendMessage(arg1:string,arg2:string,arg3:Array<db.AttachmentInput>):Promise<void>;
 

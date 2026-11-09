@@ -2,6 +2,7 @@ package db
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -141,5 +142,58 @@ func TestTouchThreadKeepsTitle(t *testing.T) {
 	}
 	if thread.Title != "Keep me" || thread.UpdatedAt != 99 {
 		t.Fatalf("thread = %+v, want title %q and updatedAt 99", thread, "Keep me")
+	}
+}
+
+func TestSearchThreadsMatchesTitleAndContent(t *testing.T) {
+	store := openTestStore(t)
+
+	threads := []Thread{
+		{ID: "t1", Title: "Deploy notes", CreatedAt: 1, UpdatedAt: 10},
+		{ID: "t2", Title: "Other", CreatedAt: 2, UpdatedAt: 20},
+		{ID: "t3", Title: "100% done", CreatedAt: 3, UpdatedAt: 30},
+	}
+	for _, thread := range threads {
+		if err := store.CreateThread(thread); err != nil {
+			t.Fatalf("CreateThread(%s): %v", thread.ID, err)
+		}
+	}
+	messages := []Message{
+		{ID: "m1", ThreadID: "t1", Role: "user", Content: "nothing here", CreatedAt: 11},
+		{ID: "m2", ThreadID: "t2", Role: "user", Content: "we discussed Kubernetes ingress", CreatedAt: 21},
+		{ID: "m3", ThreadID: "t3", Role: "user", Content: "the 100% marker", CreatedAt: 31},
+	}
+	for _, message := range messages {
+		if err := store.AddMessage(message); err != nil {
+			t.Fatalf("AddMessage(%s): %v", message.ID, err)
+		}
+	}
+
+	results, err := store.SearchThreads("kubernetes", 10)
+	if err != nil {
+		t.Fatalf("SearchThreads: %v", err)
+	}
+	if len(results) != 1 || results[0].ThreadID != "t2" {
+		t.Fatalf("content results = %+v, want t2", results)
+	}
+	if !strings.Contains(results[0].Snippet, "Kubernetes") {
+		t.Fatalf("snippet = %q, want the matching message", results[0].Snippet)
+	}
+
+	results, err = store.SearchThreads("deploy", 10)
+	if err != nil {
+		t.Fatalf("SearchThreads: %v", err)
+	}
+	if len(results) != 1 || results[0].ThreadID != "t1" || results[0].Snippet != "" {
+		t.Fatalf("title results = %+v, want t1 without a snippet", results)
+	}
+
+	// LIKE wildcards in the query are literal text, not patterns.
+	results, err = store.SearchThreads("%", 10)
+	if err != nil {
+		t.Fatalf("SearchThreads: %v", err)
+	}
+	if len(results) != 1 || results[0].ThreadID != "t3" {
+		t.Fatalf("wildcard results = %+v, want only t3", results)
 	}
 }

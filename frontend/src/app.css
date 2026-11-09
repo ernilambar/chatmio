@@ -190,3 +190,123 @@ body {
   border-color: rgb(255 255 255 / 0.3);
   background: rgb(255 255 255 / 0.18);
 }
+
+.code-block {
+  position: relative;
+  margin: 0.5rem 0;
+}
+
+.code-block pre {
+  margin: 0;
+}
+
+.code-copy {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 0.25rem;
+  background: var(--surface);
+  padding: 0.1rem 0.4rem;
+  color: var(--muted);
+  font-size: 0.6875rem;
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+
+.code-block:hover .code-copy,
+.code-copy:focus-visible {
+  opacity: 1;
+}
+
+.code-copy:hover {
+  color: var(--fg);
+}
+
+:root {
+  --code-comment: #6e7781;
+  --code-keyword: #cf222e;
+  --code-string: #0a3069;
+  --code-number: #0550ae;
+  --code-title: #8250df;
+  --code-builtin: #953800;
+  --code-meta: #116329;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --code-comment: #8b949e;
+    --code-keyword: #ff7b72;
+    --code-string: #a5d6ff;
+    --code-number: #79c0ff;
+    --code-title: #d2a8ff;
+    --code-builtin: #ffa657;
+    --code-meta: #7ee787;
+  }
+}
+
+.markdown .hljs-comment,
+.markdown .hljs-quote {
+  color: var(--code-comment);
+  font-style: italic;
+}
+
+.markdown .hljs-keyword,
+.markdown .hljs-selector-tag,
+.markdown .hljs-literal,
+.markdown .hljs-doctag,
+.markdown .hljs-name {
+  color: var(--code-keyword);
+}
+
+.markdown .hljs-string,
+.markdown .hljs-regexp,
+.markdown .hljs-addition {
+  color: var(--code-string);
+}
+
+.markdown .hljs-number,
+.markdown .hljs-symbol,
+.markdown .hljs-bullet,
+.markdown .hljs-link {
+  color: var(--code-number);
+}
+
+.markdown .hljs-title,
+.markdown .hljs-section,
+.markdown .hljs-selector-id {
+  color: var(--code-title);
+}
+
+.markdown .hljs-built_in,
+.markdown .hljs-builtin-name,
+.markdown .hljs-attr,
+.markdown .hljs-attribute,
+.markdown .hljs-variable,
+.markdown .hljs-template-variable,
+.markdown .hljs-class .hljs-title {
+  color: var(--code-builtin);
+}
+
+.markdown .hljs-meta,
+.markdown .hljs-deletion {
+  color: var(--code-meta);
+}
+
+.markdown .hljs-emphasis {
+  font-style: italic;
+}
+
+.markdown .hljs-strong {
+  font-weight: 600;
+}
+
+.bg-accent .markdown pre .hljs * {
+  color: inherit;
+}
+
+.bg-accent .markdown .code-copy {
+  border-color: rgb(255 255 255 / 0.3);
+  background: rgb(255 255 255 / 0.18);
+  color: inherit;
+}

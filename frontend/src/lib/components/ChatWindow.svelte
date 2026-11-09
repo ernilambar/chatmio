@@ -1,5 +1,6 @@
 <script lang="ts">
   import {
+    ArrowDown,
     Check,
     Copy,
     Loader2,
@@ -8,11 +9,13 @@
     Pencil,
     RotateCcw,
     Send,
+    Square,
     Trash2,
     X
   } from 'lucide-svelte'
   import { onMount } from 'svelte'
   import type { db } from '../wailsjs/go/models'
+  import { copyText } from '../clipboard'
   import Markdown from './Markdown.svelte'
 
   let {
@@ -30,7 +33,9 @@
     onedit,
     onrename,
     ondelete,
-    onmodelchange
+    onmodelchange,
+    oncancel,
+    focusNonce = 0
   }: {
     thread: db.Thread | null
     messages: db.Message[]
@@ -47,6 +52,8 @@
     onrename: (threadId: string, title: string) => Promise<void> | void
     ondelete: (threadId: string) => Promise<void> | void
     onmodelchange: (model: string) => Promise<void> | void
+    oncancel: () => void
+    focusNonce?: number
   } = $props()
 
   let draft = $state('')
@@ -61,6 +68,7 @@
   let copiedId = $state<string | null>(null)
   let copyTimer: ReturnType<typeof setTimeout> | undefined
   let editing = $state<db.Message | null>(null)
+  let atBottom = $state(true)
 
   const selectedModel = $derived(thread?.model || defaultModel)
   const lastMessageId = $derived(
@@ -84,6 +92,7 @@
       renaming = false
       confirmingDelete = false
       editing = null
+      atBottom = true
       inputEl?.focus()
     }
   })
@@ -101,10 +110,26 @@
   })
 
   $effect(() => {
+    if (focusNonce > 0) inputEl?.focus()
+  })
+
+  $effect(() => {
     messages
     streamText
-    if (scroller) scroller.scrollTop = scroller.scrollHeight
+    if (scroller && atBottom) scroller.scrollTop = scroller.scrollHeight
   })
+
+  function handleScroll(): void {
+    const element = scroller
+    if (!element) return
+    atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 32
+  }
+
+  function scrollToLatest(): void {
+    const element = scroller
+    if (!element) return
+    element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' })
+  }
 
   function submit(): void {
     const content = draft.trim()
@@ -124,6 +149,7 @@
     const selected = files
     draft = ''
     files = []
+    atBottom = true
     onsend(content, selected)
     inputEl?.focus()
   }
@@ -208,18 +234,7 @@
 
   async function copyMessage(message: db.Message): Promise<void> {
     if (!message.content) return
-    try {
-      await navigator.clipboard.writeText(message.content)
-    } catch {
-      const area = document.createElement('textarea')
-      area.value = message.content
-      area.style.position = 'fixed'
-      area.style.opacity = '0'
-      document.body.appendChild(area)
-      area.select()
-      document.execCommand('copy')
-      area.remove()
-    }
+    await copyText(message.content)
     copiedId = message.id
     if (copyTimer) clearTimeout(copyTimer)
     copyTimer = setTimeout(() => {
@@ -310,7 +325,12 @@
     {/if}
   </header>
 
-  <div bind:this={scroller} class="flex-1 overflow-y-auto px-6 py-4">
+  <div class="relative min-h-0 flex-1">
+    <div
+      bind:this={scroller}
+      onscroll={handleScroll}
+      class="h-full overflow-y-auto px-6 py-4"
+    >
     {#if messages.length === 0 && !streaming}
       <div class="flex h-full flex-col items-center justify-center gap-2 text-muted">
         <MessageSquare size={28} />
@@ -420,6 +440,19 @@
         {/if}
       </div>
     {/if}
+    </div>
+
+    {#if !atBottom}
+      <button
+        type="button"
+        class="absolute bottom-3 right-4 flex items-center gap-1 rounded-full border border-line bg-surface px-2.5 py-1 text-xs font-medium text-muted shadow-md transition-colors hover:text-fg"
+        title="Jump to latest (end)"
+        onclick={scrollToLatest}
+      >
+        <ArrowDown size={13} />
+        Latest
+      </button>
+    {/if}
   </div>
 
   <div class="border-t border-line p-4">
@@ -490,14 +523,25 @@
         placeholder={editing ? 'Edit message…' : 'Send a message…'}
         class="max-h-40 flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted"
       ></textarea>
-      <button
-        class="rounded-md bg-accent p-1.5 text-white transition-opacity disabled:opacity-40"
-        title="Send"
-        disabled={streaming || (editing ? !draft.trim() : !draft.trim() && files.length === 0)}
-        onclick={submit}
-      >
-        <Send size={16} />
-      </button>
+      {#if streaming}
+        <button
+          type="button"
+          class="rounded-md bg-accent p-1.5 text-white transition-opacity"
+          title="Stop generating"
+          onclick={oncancel}
+        >
+          <Square size={16} fill="currentColor" />
+        </button>
+      {:else}
+        <button
+          class="rounded-md bg-accent p-1.5 text-white transition-opacity disabled:opacity-40"
+          title="Send"
+          disabled={editing ? !draft.trim() : !draft.trim() && files.length === 0}
+          onclick={submit}
+        >
+          <Send size={16} />
+        </button>
+      {/if}
     </div>
   </div>
 </main>

@@ -1,4 +1,5 @@
 import {
+  CancelReply,
   CreateThread,
   DeleteThread,
   EditMessage,
@@ -231,6 +232,16 @@ class ChatStore {
       this.messages = await GetMessages(threadId)
     } finally {
       this.streaming = false
+    }
+  }
+
+  // cancel stops the in-flight reply. The partial reply is kept by the backend.
+  async cancel(): Promise<void> {
+    if (!this.streaming) return
+    try {
+      await CancelReply()
+    } catch (err) {
+      this.error = err instanceof Error ? err.message : String(err)
     }
   }
 

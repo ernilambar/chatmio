@@ -47,6 +47,10 @@ type App struct {
 	store   *db.Store
 	sendMu  sync.Mutex
 
+	// streamCancel stops the reply currently streaming, if any.
+	streamMu     sync.Mutex
+	streamCancel context.CancelFunc
+
 	// Title requests run after the reply is delivered so they never delay it.
 	titleMu sync.Mutex
 	titling map[string]bool
@@ -122,6 +126,15 @@ func (a *App) ListThreads() ([]db.Thread, error) {
 		return nil, errors.New("database unavailable")
 	}
 	return a.store.ListThreads()
+}
+
+// SearchThreads finds threads by title or message content, most recently
+// updated first.
+func (a *App) SearchThreads(query string) ([]db.SearchResult, error) {
+	if a.store == nil {
+		return nil, errors.New("database unavailable")
+	}
+	return a.store.SearchThreads(query, 20)
 }
 
 // CreateThread creates an empty chat thread and returns it.
@@ -252,6 +265,30 @@ func (a *App) SendMessage(threadID, content string, attachments []db.AttachmentI
 	}
 
 	return a.streamReply(thread, cfg, model)
+}
+
+// CancelReply stops the reply that is currently streaming. Text received so
+// far is kept and the calling SendMessage/RegenerateReply/EditMessage returns
+// without an error.
+func (a *App) CancelReply() {
+	a.streamMu.Lock()
+	cancel := a.streamCancel
+	a.streamMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (a *App) setStreamCancel(cancel context.CancelFunc) {
+	a.streamMu.Lock()
+	a.streamCancel = cancel
+	a.streamMu.Unlock()
+}
+
+func (a *App) clearStreamCancel() {
+	a.streamMu.Lock()
+	a.streamCancel = nil
+	a.streamMu.Unlock()
 }
 
 // RegenerateReply discards the trailing assistant reply, if any, and streams a
@@ -388,8 +425,13 @@ func (a *App) streamReply(thread db.Thread, cfg config.Config, model string) err
 	}
 
 	client := ai.New(cfg.BaseURL, cfg.APIKey, nil)
+	streamCtx, cancel := context.WithCancel(a.ctx)
+	defer cancel()
+	a.setStreamCancel(cancel)
+	defer a.clearStreamCancel()
+
 	var reply strings.Builder
-	err = client.StreamChat(a.ctx, ai.ChatOptions{
+	err = client.StreamChat(streamCtx, ai.ChatOptions{
 		Model:            model,
 		Messages:         prompt,
 		Temperature:      &thread.Temperature,
@@ -403,8 +445,19 @@ func (a *App) streamReply(thread db.Thread, cfg config.Config, model string) err
 			Delta:    token,
 		})
 	})
+
+	// A user cancel keeps whatever text arrived. Any other error, including
+	// cancellation during shutdown, is reported to the caller.
+	stopped := false
 	if err != nil {
-		return err
+		if errors.Is(streamCtx.Err(), context.Canceled) && a.ctx.Err() == nil {
+			stopped = true
+		} else {
+			return err
+		}
+	}
+	if stopped && strings.TrimSpace(reply.String()) == "" {
+		return nil
 	}
 
 	assistantMessage := db.Message{
@@ -426,7 +479,7 @@ func (a *App) streamReply(thread db.Thread, cfg config.Config, model string) err
 		Message:  assistantMessage,
 	})
 
-	if thread.Title == "" || thread.Title == defaultThreadTitle {
+	if !stopped && (thread.Title == "" || thread.Title == defaultThreadTitle) {
 		a.queueTitle(thread, cfg, model, lastUserTitleSource(history))
 	}
 	return nil

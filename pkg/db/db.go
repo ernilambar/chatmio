@@ -3,9 +3,11 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -216,6 +218,130 @@ func (s *Store) ListThreads() ([]Thread, error) {
 		threads = append(threads, t)
 	}
 	return threads, rows.Err()
+}
+
+// SearchResult is a thread matching a search query with an excerpt from the
+// most recent matching message.
+type SearchResult struct {
+	ThreadID string `json:"threadId"`
+	Title    string `json:"title"`
+	Snippet  string `json:"snippet"`
+}
+
+const (
+	searchSnippetRunes = 160
+	searchSnippetLead  = 40
+)
+
+// SearchThreads finds threads by title or message content, most recently
+// updated first. Empty queries return no results.
+func (s *Store) SearchThreads(query string, limit int) ([]SearchResult, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return []SearchResult{}, nil
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	pattern := "%" + escapeLike(query) + "%"
+
+	rows, err := s.db.Query(`
+		SELECT t.id, t.title
+		FROM threads t
+		WHERE t.title LIKE ? ESCAPE '\'
+		   OR EXISTS (
+			SELECT 1 FROM messages m
+			WHERE m.thread_id = t.id AND m.content LIKE ? ESCAPE '\'
+		   )
+		ORDER BY t.updated_at DESC
+		LIMIT ?`, pattern, pattern, limit)
+	if err != nil {
+		return nil, fmt.Errorf("db: search threads: %w", err)
+	}
+
+	results := []SearchResult{}
+	for rows.Next() {
+		var result SearchResult
+		if err := rows.Scan(&result.ThreadID, &result.Title); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("db: scan search result: %w", err)
+		}
+		results = append(results, result)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("db: close search rows: %w", err)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("db: search threads: %w", err)
+	}
+
+	for i := range results {
+		snippet, err := s.searchSnippet(results[i].ThreadID, pattern, query)
+		if err != nil {
+			return nil, err
+		}
+		results[i].Snippet = snippet
+	}
+	return results, nil
+}
+
+func (s *Store) searchSnippet(threadID, pattern, query string) (string, error) {
+	var content string
+	err := s.db.QueryRow(`
+		SELECT content FROM messages
+		WHERE thread_id = ? AND content LIKE ? ESCAPE '\'
+		ORDER BY created_at DESC, rowid DESC
+		LIMIT 1`, threadID, pattern).Scan(&content)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("db: search snippet: %w", err)
+	}
+	return excerpt(content, query), nil
+}
+
+// excerpt collapses whitespace and centers a short window around the match.
+func excerpt(content, query string) string {
+	content = strings.Join(strings.Fields(content), " ")
+	runes := []rune(content)
+	if len(runes) <= searchSnippetRunes {
+		return content
+	}
+
+	start := 0
+	index := strings.Index(strings.ToLower(content), strings.ToLower(query))
+	if index >= 0 {
+		matchRune := len([]rune(content[:index]))
+		start = matchRune - searchSnippetLead
+		if start < 0 {
+			start = 0
+		}
+	}
+	end := start + searchSnippetRunes
+	if end > len(runes) {
+		end = len(runes)
+		start = end - searchSnippetRunes
+		if start < 0 {
+			start = 0
+		}
+	}
+
+	snippet := string(runes[start:end])
+	if start > 0 {
+		snippet = "…" + snippet
+	}
+	if end < len(runes) {
+		snippet += "…"
+	}
+	return snippet
+}
+
+func escapeLike(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `%`, `\%`)
+	value = strings.ReplaceAll(value, `_`, `\_`)
+	return value
 }
 
 // GetThread returns a single thread.

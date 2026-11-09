@@ -2,10 +2,13 @@
   import { onMount } from 'svelte'
   import Sidebar from './lib/components/Sidebar.svelte'
   import ChatWindow from './lib/components/ChatWindow.svelte'
+  import SearchPalette from './lib/components/SearchPalette.svelte'
   import SettingsModal from './lib/components/SettingsModal.svelte'
   import { chat } from './lib/stores/chat.svelte'
 
   let settingsOpen = $state(false)
+  let searchOpen = $state(false)
+  let composerFocus = $state(0)
 
   const activeThread = $derived(chat.activeThread)
 
@@ -15,7 +18,44 @@
     })
     return () => chat.destroy()
   })
+
+  function handleKeydown(event: KeyboardEvent): void {
+    const mod = event.metaKey || event.ctrlKey
+    const key = event.key.toLowerCase()
+
+    if (mod && key === 'k') {
+      event.preventDefault()
+      searchOpen = !searchOpen
+      return
+    }
+    if (mod && key === 'n') {
+      event.preventDefault()
+      void chat.createThread()
+      return
+    }
+    if (mod && event.key === ',') {
+      event.preventDefault()
+      settingsOpen = true
+      return
+    }
+    if (mod && key === 'l') {
+      event.preventDefault()
+      composerFocus += 1
+      return
+    }
+    if (
+      event.key === 'Escape' &&
+      !event.defaultPrevented &&
+      !settingsOpen &&
+      !searchOpen &&
+      chat.streaming
+    ) {
+      void chat.cancel()
+    }
+  }
 </script>
+
+<svelte:window onkeydown={handleKeydown} />
 
 <div class="flex h-full">
   <Sidebar
@@ -24,6 +64,7 @@
     oncreate={() => chat.createThread()}
     onselect={(id) => chat.select(id)}
     onsettings={() => (settingsOpen = true)}
+    onsearch={() => (searchOpen = true)}
   />
   <ChatWindow
     thread={activeThread}
@@ -41,8 +82,17 @@
     onrename={(id, title) => chat.renameThread(id, title)}
     ondelete={(id) => chat.deleteThread(id)}
     onmodelchange={(model) => chat.setThreadModel(model)}
+    oncancel={() => void chat.cancel()}
+    focusNonce={composerFocus}
   />
 </div>
+
+<SearchPalette
+  open={searchOpen}
+  threads={chat.threads}
+  onselect={(id) => void chat.select(id)}
+  onclose={() => (searchOpen = false)}
+/>
 
 <SettingsModal
   open={settingsOpen}

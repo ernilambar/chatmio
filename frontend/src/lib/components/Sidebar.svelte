@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { MessageSquare, Plus, Settings } from 'lucide-svelte'
+  import { MessageSquare, Plus, Search, Settings } from 'lucide-svelte'
   import type { db } from '../wailsjs/go/models'
 
   let {
@@ -7,26 +7,37 @@
     activeId,
     oncreate,
     onselect,
-    onsettings
+    onsettings,
+    onsearch
   }: {
     threads: db.Thread[]
     activeId: string | null
     oncreate: () => void
     onselect: (id: string) => void
     onsettings: () => void
+    onsearch: () => void
   } = $props()
 </script>
 
 <aside class="flex w-64 shrink-0 flex-col border-r border-line bg-panel">
   <div class="flex items-center justify-between px-3 py-3">
     <span class="px-1 text-sm font-semibold tracking-wide">Chattu</span>
-    <button
-      class="rounded-md p-1.5 text-muted transition-colors hover:bg-surface hover:text-fg"
-      title="New chat"
-      onclick={oncreate}
-    >
-      <Plus size={16} />
-    </button>
+    <div class="flex items-center gap-0.5">
+      <button
+        class="rounded-md p-1.5 text-muted transition-colors hover:bg-surface hover:text-fg"
+        title="Search chats (⌘K)"
+        onclick={onsearch}
+      >
+        <Search size={16} />
+      </button>
+      <button
+        class="rounded-md p-1.5 text-muted transition-colors hover:bg-surface hover:text-fg"
+        title="New chat (⌘N)"
+        onclick={oncreate}
+      >
+        <Plus size={16} />
+      </button>
+    </div>
   </div>
 
   <nav class="flex-1 overflow-y-auto px-2 pb-2">
