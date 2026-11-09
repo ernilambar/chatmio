@@ -7,39 +7,22 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
-
-// Theme identifies the UI colour scheme.
-type Theme string
-
-const (
-	ThemeSystem Theme = "system"
-	ThemeLight  Theme = "light"
-	ThemeDark   Theme = "dark"
-)
-
-// Provider is an OpenAI-compatible endpoint preset.
-type Provider struct {
-	ID      string            `json:"id"`
-	Name    string            `json:"name"`
-	BaseURL string            `json:"baseUrl"`
-	Headers map[string]string `json:"headers,omitempty"`
-}
 
 // Config is the persisted application configuration.
+// APIKey is stored in plain text for now; OS keychain support comes later.
 type Config struct {
-	Theme          Theme      `json:"theme"`
-	ActiveProvider string     `json:"activeProvider"`
-	ActiveModel    string     `json:"activeModel"`
-	SystemPrompt   string     `json:"systemPrompt"`
-	Providers      []Provider `json:"providers"`
+	BaseURL      string `json:"baseUrl"`
+	APIKey       string `json:"apiKey"`
+	Model        string `json:"model"`
+	SystemPrompt string `json:"systemPrompt"`
 }
 
 // Default returns the configuration used on first launch.
 func Default() Config {
 	return Config{
-		Theme:     ThemeSystem,
-		Providers: []Provider{},
+		BaseURL: "https://api.openai.com/v1",
 	}
 }
 
@@ -76,25 +59,20 @@ func (m *Manager) Load() (Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("config: parse %s: %w", m.path, err)
 	}
-	if cfg.Providers == nil {
-		cfg.Providers = []Provider{}
+	// Migrate configs written before BaseURL existed (or with a cleared value).
+	if cfg.BaseURL == "" {
+		cfg.BaseURL = Default().BaseURL
+		if err := m.Save(cfg); err != nil {
+			return Config{}, err
+		}
 	}
 	return cfg, nil
 }
 
 // Save writes the config atomically.
 func (m *Manager) Save(cfg Config) error {
-	if cfg.Theme == "" {
-		cfg.Theme = ThemeSystem
-	}
-	switch cfg.Theme {
-	case ThemeSystem, ThemeLight, ThemeDark:
-	default:
-		return fmt.Errorf("config: invalid theme %q", cfg.Theme)
-	}
-	if cfg.Providers == nil {
-		cfg.Providers = []Provider{}
-	}
+	cfg.BaseURL = strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
+	cfg.Model = strings.TrimSpace(cfg.Model)
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {

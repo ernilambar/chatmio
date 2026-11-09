@@ -1,17 +1,19 @@
 <script lang="ts">
-  import { MessageSquare, Plus } from 'lucide-svelte'
-  import type { Thread } from '../types'
+  import { MessageSquare, Plus, Settings } from 'lucide-svelte'
+  import type { db } from '../wailsjs/go/models'
 
   let {
     threads,
     activeId,
     oncreate,
-    onselect
+    onselect,
+    onsettings
   }: {
-    threads: Thread[]
+    threads: db.Thread[]
     activeId: string | null
     oncreate: () => void
     onselect: (id: string) => void
+    onsettings: () => void
   } = $props()
 </script>
 
@@ -28,20 +30,26 @@
   </div>
 
   <nav class="flex-1 overflow-y-auto px-2 pb-2">
-    {#if threads.length === 0}
-      <p class="px-2 py-4 text-xs text-muted">No chats yet.</p>
-    {:else}
-      {#each threads as thread (thread.id)}
-        <button
-          class="mb-0.5 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors {thread.id === activeId
-            ? 'bg-surface text-fg'
-            : 'text-muted hover:bg-surface hover:text-fg'}"
-          onclick={() => onselect(thread.id)}
-        >
-          <MessageSquare size={14} class="shrink-0" />
-          <span class="truncate">{thread.title}</span>
-        </button>
-      {/each}
-    {/if}
+    {#each threads as thread (thread.id)}
+      <button
+        class="mb-0.5 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors {thread.id === activeId
+          ? 'bg-surface text-fg'
+          : 'text-muted hover:bg-surface hover:text-fg'}"
+        onclick={() => onselect(thread.id)}
+      >
+        <MessageSquare size={14} class="shrink-0" />
+        <span class="truncate">{thread.title}</span>
+      </button>
+    {/each}
   </nav>
+
+  <div class="border-t border-line p-2">
+    <button
+      class="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-muted transition-colors hover:bg-surface hover:text-fg"
+      onclick={onsettings}
+    >
+      <Settings size={14} />
+      Settings
+    </button>
+  </div>
 </aside>

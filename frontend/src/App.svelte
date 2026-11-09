@@ -1,9 +1,20 @@
 <script lang="ts">
+  import { onMount } from 'svelte'
   import Sidebar from './lib/components/Sidebar.svelte'
   import ChatWindow from './lib/components/ChatWindow.svelte'
+  import SettingsModal from './lib/components/SettingsModal.svelte'
   import { chat } from './lib/stores/chat.svelte'
 
+  let settingsOpen = $state(false)
+
   const activeThread = $derived(chat.activeThread)
+
+  onMount(() => {
+    chat.init().catch((err) => {
+      chat.error = err instanceof Error ? err.message : String(err)
+    })
+    return () => chat.destroy()
+  })
 </script>
 
 <div class="flex h-full">
@@ -12,6 +23,21 @@
     activeId={chat.activeId}
     oncreate={() => chat.createThread()}
     onselect={(id) => chat.select(id)}
+    onsettings={() => (settingsOpen = true)}
   />
-  <ChatWindow thread={activeThread} />
+  <ChatWindow
+    thread={activeThread}
+    messages={chat.messages}
+    streaming={chat.streaming}
+    streamText={chat.streamText}
+    error={chat.error}
+    onsend={(content) => chat.send(content)}
+  />
 </div>
+
+<SettingsModal
+  open={settingsOpen}
+  cfg={chat.config}
+  onclose={() => (settingsOpen = false)}
+  onsave={(next) => chat.saveConfig(next)}
+/>

@@ -1,29 +1,10 @@
 export namespace config {
 	
-	export class Provider {
-	    id: string;
-	    name: string;
-	    baseUrl: string;
-	    headers?: Record<string, string>;
-	
-	    static createFrom(source: any = {}) {
-	        return new Provider(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.name = source["name"];
-	        this.baseUrl = source["baseUrl"];
-	        this.headers = source["headers"];
-	    }
-	}
 	export class Config {
-	    theme: string;
-	    activeProvider: string;
-	    activeModel: string;
+	    baseUrl: string;
+	    apiKey: string;
+	    model: string;
 	    systemPrompt: string;
-	    providers: Provider[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -31,30 +12,64 @@ export namespace config {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.theme = source["theme"];
-	        this.activeProvider = source["activeProvider"];
-	        this.activeModel = source["activeModel"];
+	        this.baseUrl = source["baseUrl"];
+	        this.apiKey = source["apiKey"];
+	        this.model = source["model"];
 	        this.systemPrompt = source["systemPrompt"];
-	        this.providers = this.convertValues(source["providers"], Provider);
+	    }
+	}
+
+}
+
+export namespace db {
+	
+	export class Message {
+	    id: string;
+	    threadId: string;
+	    role: string;
+	    content: string;
+	    createdAt: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Message(source);
 	    }
 	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.threadId = source["threadId"];
+	        this.role = source["role"];
+	        this.content = source["content"];
+	        this.createdAt = source["createdAt"];
+	    }
+	}
+	export class Thread {
+	    id: string;
+	    title: string;
+	    systemPrompt: string;
+	    temperature: number;
+	    topP: number;
+	    maxTokens: number;
+	    frequencyPenalty: number;
+	    createdAt: number;
+	    updatedAt: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Thread(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.systemPrompt = source["systemPrompt"];
+	        this.temperature = source["temperature"];
+	        this.topP = source["topP"];
+	        this.maxTokens = source["maxTokens"];
+	        this.frequencyPenalty = source["frequencyPenalty"];
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
+	    }
 	}
 
 }
