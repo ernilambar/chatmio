@@ -1,5 +1,6 @@
 import {
   CancelReply,
+  CreateTemporaryThread,
   CreateThread,
   DeleteThread,
   EditMessage,
@@ -94,6 +95,7 @@ class ChatStore {
   messages = $state<db.Message[]>([])
   models = $state<string[]>([])
   activeId = $state<string | null>(null)
+  tempThread = $state<db.Thread | null>(null)
   streaming = $state(false)
   streamText = $state('')
   streamReasoning = $state('')
@@ -104,7 +106,13 @@ class ChatStore {
   private failedSend = $state<{ content: string; files: File[] } | null>(null)
 
   get activeThread(): db.Thread | null {
+    if (this.tempThread?.id === this.activeId) return this.tempThread
     return this.threads.find((thread) => thread.id === this.activeId) ?? null
+  }
+
+  // temporary is true while the active chat is not written to disk.
+  get temporary(): boolean {
+    return this.tempThread !== null && this.tempThread.id === this.activeId
   }
 
   get canRetry(): boolean {
@@ -206,8 +214,20 @@ class ChatStore {
     }
   }
 
+  private async dropTemporary(): Promise<void> {
+    const temporary = this.tempThread
+    if (!temporary) return
+    this.tempThread = null
+    try {
+      await DeleteThread(temporary.id)
+    } catch {
+      // The chat is already gone locally; backend cleanup is best-effort.
+    }
+  }
+
   async createThread(): Promise<void> {
     if (this.streaming) return
+    await this.dropTemporary()
     const thread = await CreateThread()
     this.threads = [thread, ...this.threads]
     this.activeId = thread.id
@@ -216,8 +236,25 @@ class ChatStore {
     this.failedSend = null
   }
 
+  // createTemporaryThread starts a chat whose messages are never written to
+  // disk. Switching away from it discards it.
+  async createTemporaryThread(): Promise<void> {
+    if (this.streaming) return
+    await this.dropTemporary()
+    const thread = await CreateTemporaryThread()
+    this.tempThread = thread
+    this.activeId = thread.id
+    this.messages = []
+    this.error = null
+    this.failedSend = null
+    this.resetStream()
+  }
+
   async select(id: string): Promise<void> {
     if (this.streaming || id === this.activeId) return
+    if (this.tempThread && id !== this.tempThread.id) {
+      await this.dropTemporary()
+    }
     this.activeId = id
     this.error = null
     this.resetStream()
@@ -372,6 +409,16 @@ class ChatStore {
     }
   }
 
+  private updateThread(threadId: string, patch: Partial<db.Thread>): void {
+    if (this.tempThread?.id === threadId) {
+      this.tempThread = db.Thread.createFrom({ ...this.tempThread, ...patch })
+      return
+    }
+    this.threads = this.threads.map((thread) =>
+      thread.id === threadId ? db.Thread.createFrom({ ...thread, ...patch }) : thread
+    )
+  }
+
   async saveConfig(next: config.Config): Promise<void> {
     await SaveConfig(next)
     this.config = await GetConfig()
@@ -383,9 +430,7 @@ class ChatStore {
     const threadId = this.activeId
     try {
       await SetThreadModel(threadId, model)
-      this.threads = this.threads.map((thread) =>
-        thread.id === threadId ? db.Thread.createFrom({ ...thread, model }) : thread
-      )
+      this.updateThread(threadId, { model })
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err)
     }
@@ -396,9 +441,7 @@ class ChatStore {
     const threadId = this.activeId
     try {
       await SetThreadWebTools(threadId, enabled)
-      this.threads = this.threads.map((thread) =>
-        thread.id === threadId ? db.Thread.createFrom({ ...thread, webTools: enabled }) : thread
-      )
+      this.updateThread(threadId, { webTools: enabled })
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err)
     }
@@ -408,9 +451,7 @@ class ChatStore {
     if (!this.activeId) return
     const threadId = this.activeId
     await SetThreadSettings(threadId, settings)
-    this.threads = this.threads.map((thread) =>
-      thread.id === threadId ? db.Thread.createFrom({ ...thread, ...settings }) : thread
-    )
+    this.updateThread(threadId, { ...settings })
   }
 
   async renameThread(threadId: string, title: string): Promise<void> {
@@ -418,9 +459,7 @@ class ChatStore {
     if (!title) return
     try {
       await RenameThread(threadId, title)
-      this.threads = this.threads.map((thread) =>
-        thread.id === threadId ? db.Thread.createFrom({ ...thread, title }) : thread
-      )
+      this.updateThread(threadId, { title })
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err)
     }
@@ -430,6 +469,7 @@ class ChatStore {
     if (this.streaming) return
     try {
       await DeleteThread(threadId)
+      if (this.tempThread?.id === threadId) this.tempThread = null
       const wasActive = this.activeId === threadId
       this.threads = this.threads.filter((thread) => thread.id !== threadId)
       if (!wasActive) return

@@ -147,10 +147,22 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("db: create dir: %w", err)
 	}
 
-	dsn := "file:" + path +
+	return open("file:" + path +
 		"?_pragma=foreign_keys(1)" +
 		"&_pragma=journal_mode(WAL)" +
-		"&_pragma=busy_timeout(5000)"
+		"&_pragma=busy_timeout(5000)")
+}
+
+// OpenMemory opens a private in-memory store. Nothing written to it survives
+// the process, so temporary chats never touch disk.
+func OpenMemory() (*Store, error) {
+	return open("file:chattu-temp-" + uuid.NewString() +
+		"?mode=memory&cache=shared" +
+		"&_pragma=foreign_keys(1)" +
+		"&_pragma=busy_timeout(5000)")
+}
+
+func open(dsn string) (*Store, error) {
 	sqlDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("db: open: %w", err)

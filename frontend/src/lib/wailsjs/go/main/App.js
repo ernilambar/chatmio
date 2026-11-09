@@ -6,6 +6,10 @@ export function CancelReply() {
   return window['go']['main']['App']['CancelReply']();
 }
 
+export function CreateTemporaryThread() {
+  return window['go']['main']['App']['CreateTemporaryThread']();
+}
+
 export function CreateThread() {
   return window['go']['main']['App']['CreateThread']();
 }

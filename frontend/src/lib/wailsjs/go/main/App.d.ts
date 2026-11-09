@@ -6,6 +6,8 @@ import {config} from '../models';
 
 export function CancelReply():Promise<void>;
 
+export function CreateTemporaryThread():Promise<db.Thread>;
+
 export function CreateThread():Promise<db.Thread>;
 
 export function DeleteThread(arg1:string):Promise<void>;

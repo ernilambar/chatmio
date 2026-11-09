@@ -11,8 +11,10 @@ the chat model when it is unset or returns no title.
 - Streaming replies rendered as GitHub-flavored Markdown, with highlighted code and copy buttons.
 - Image and text-file attachments; unsupported binary files are rejected before sending.
 - Search chats and messages (⌘K), rename or delete chats, and retry, regenerate, or edit messages.
+- Temporary chats (⌘⇧N) live only in memory: messages and attachments are never written to
+  `chats.db`, and the chat is discarded when you leave it or quit the app.
 - Stop a streaming reply with the stop button or Esc; received text is kept.
-- Shortcuts: ⌘N new chat, ⌘K search, ⌘L focus composer, ⌘, settings, Esc stop.
+- Shortcuts: ⌘N new chat, ⌘⇧N temporary chat, ⌘K search, ⌘L focus composer, ⌘, settings, Esc stop.
 
 ## Requirements
 

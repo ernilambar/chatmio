@@ -53,7 +53,9 @@ npm --prefix frontend run check          # typecheck Svelte/TypeScript
   belongs in the runes-based stores under `frontend/src/lib/stores`; do not introduce legacy Svelte
   stores or a second styling system.
 - Persistence is backend-only: config through `pkg/config`, chats and messages through `pkg/db`.
-  The frontend must call Wails bindings instead of touching files or SQLite.
+  The frontend must call Wails bindings instead of touching files or SQLite. Temporary chats use a
+  separate in-memory store (`db.OpenMemory`) so their threads, messages, and attachments never reach
+  disk; do not persist them or include them in thread listings.
 - Pre-release: no config or database migrations. Change the schema in place; developers delete
   `chats.db` / `config.json` after a breaking change. Do not add backward-compatibility code.
 - Keep the app macOS arm64 only. Do not add Intel, universal, or non-macOS build paths.

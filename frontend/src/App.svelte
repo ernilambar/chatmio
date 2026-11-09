@@ -62,6 +62,11 @@
       searchOpen = !searchOpen
       return
     }
+    if (mod && event.shiftKey && key === 'n') {
+      event.preventDefault()
+      void chat.createTemporaryThread()
+      return
+    }
     if (mod && key === 'n') {
       event.preventDefault()
       void chat.createThread()
@@ -103,7 +108,9 @@
     <Sidebar
       threads={chat.threads}
       activeId={chat.activeId}
+      temporaryActive={chat.temporary}
       oncreate={() => chat.createThread()}
+      oncreatetemporary={() => chat.createTemporaryThread()}
       onselect={(id) => chat.select(id)}
       onsettings={() => (settingsOpen = true)}
       onsearch={() => (searchOpen = true)}
@@ -112,6 +119,7 @@
   {/if}
   <ChatWindow
     thread={activeThread}
+    temporary={chat.temporary}
     messages={chat.messages}
     streaming={chat.streaming}
     streamText={chat.streamText}

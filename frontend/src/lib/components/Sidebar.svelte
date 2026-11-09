@@ -1,11 +1,13 @@
 <script lang="ts">
-  import { MessageSquare, PanelLeftClose, Plus, Search, Settings } from 'lucide-svelte'
+  import { Ghost, MessageSquare, PanelLeftClose, Plus, Search, Settings } from 'lucide-svelte'
   import type { db } from '../wailsjs/go/models'
 
   let {
     threads,
     activeId,
+    temporaryActive,
     oncreate,
+    oncreatetemporary,
     onselect,
     onsettings,
     onsearch,
@@ -13,7 +15,9 @@
   }: {
     threads: db.Thread[]
     activeId: string | null
+    temporaryActive: boolean
     oncreate: () => void
+    oncreatetemporary: () => void
     onselect: (id: string) => void
     onsettings: () => void
     onsearch: () => void
@@ -38,6 +42,16 @@
         onclick={onsearch}
       >
         <Search size={16} />
+      </button>
+      <button
+        class="rounded-md p-1.5 transition-colors {temporaryActive
+          ? 'bg-surface text-fg'
+          : 'text-muted hover:bg-surface hover:text-fg'}"
+        title="Temporary chat (⌘⇧N, not saved)"
+        aria-pressed={temporaryActive}
+        onclick={oncreatetemporary}
+      >
+        <Ghost size={16} />
       </button>
       <button
         class="rounded-md p-1.5 text-muted transition-colors hover:bg-surface hover:text-fg"

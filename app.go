@@ -26,6 +26,7 @@ import (
 
 const (
 	defaultThreadTitle     = "New chat"
+	temporaryThreadTitle   = "Temporary chat"
 	titleTemperature       = 0.2
 	titleMaxTokens         = 512
 	titleTimeout           = 30 * time.Second
@@ -42,11 +43,16 @@ const (
 
 // App is the backend bridge exposed to the frontend.
 type App struct {
-	ctx     context.Context
-	dataDir string
-	config  *config.Manager
-	store   *db.Store
-	sendMu  sync.Mutex
+	ctx       context.Context
+	dataDir   string
+	config    *config.Manager
+	store     *db.Store
+	tempStore *db.Store
+	sendMu    sync.Mutex
+
+	// Temporary chats live in an in-memory store and are never written to disk.
+	tempMu  sync.Mutex
+	tempIDs map[string]bool
 
 	// streamCancel stops the reply currently streaming, if any.
 	streamMu     sync.Mutex
@@ -75,6 +81,7 @@ func NewApp() *App {
 		dataDir: dataDir,
 		config:  config.NewManager(filepath.Join(dataDir, "config.json")),
 		titling: make(map[string]bool),
+		tempIDs: make(map[string]bool),
 	}
 }
 
@@ -92,6 +99,13 @@ func (a *App) startup(ctx context.Context) {
 		return
 	}
 	a.store = store
+
+	tempStore, err := db.OpenMemory()
+	if err != nil {
+		log.Printf("app: open temporary database: %v", err)
+		return
+	}
+	a.tempStore = tempStore
 }
 
 // shutdown is called by Wails before the application exits.
@@ -102,6 +116,9 @@ func (a *App) shutdown(context.Context) {
 	a.titleWg.Wait()
 	if err := a.store.Close(); err != nil {
 		log.Printf("app: close database: %v", err)
+	}
+	if err := a.tempStore.Close(); err != nil {
+		log.Printf("app: close temporary database: %v", err)
 	}
 }
 
@@ -130,6 +147,31 @@ func (a *App) SaveConfig(cfg config.Config) error {
 		return err
 	}
 	return a.config.Save(cfg)
+}
+
+// threadStore returns the store that owns a thread: the in-memory store for
+// temporary chats, the disk store otherwise.
+func (a *App) threadStore(threadID string) (*db.Store, error) {
+	a.tempMu.Lock()
+	temporary := a.tempIDs[threadID]
+	tempStore := a.tempStore
+	a.tempMu.Unlock()
+	if temporary {
+		if tempStore == nil {
+			return nil, errors.New("temporary chat unavailable")
+		}
+		return tempStore, nil
+	}
+	if a.store == nil {
+		return nil, errors.New("database unavailable")
+	}
+	return a.store, nil
+}
+
+func (a *App) isTemporaryThread(threadID string) bool {
+	a.tempMu.Lock()
+	defer a.tempMu.Unlock()
+	return a.tempIDs[threadID]
 }
 
 // ListThreads returns all chat threads, most recently updated first.
@@ -178,12 +220,44 @@ func (a *App) CreateThread() (db.Thread, error) {
 	return thread, nil
 }
 
+// CreateTemporaryThread creates a chat that lives only in memory. Messages are
+// never written to disk and the chat disappears when the app exits.
+func (a *App) CreateTemporaryThread() (db.Thread, error) {
+	if a.tempStore == nil {
+		return db.Thread{}, errors.New("temporary chat unavailable")
+	}
+	cfg, err := a.config.Load()
+	if err != nil {
+		return db.Thread{}, err
+	}
+	now := time.Now().UnixMilli()
+	thread := db.Thread{
+		ID:               uuid.NewString(),
+		Title:            temporaryThreadTitle,
+		Model:            strings.TrimSpace(cfg.ChatModel),
+		Temperature:      cfg.Temperature,
+		TopP:             cfg.TopP,
+		MaxTokens:        cfg.MaxTokens,
+		FrequencyPenalty: cfg.FrequencyPenalty,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	if err := a.tempStore.CreateThread(thread); err != nil {
+		return db.Thread{}, err
+	}
+	a.tempMu.Lock()
+	a.tempIDs[thread.ID] = true
+	a.tempMu.Unlock()
+	return thread, nil
+}
+
 // GetMessages returns the messages of a thread in chronological order.
 func (a *App) GetMessages(threadID string) ([]db.Message, error) {
-	if a.store == nil {
-		return nil, errors.New("database unavailable")
+	store, err := a.threadStore(threadID)
+	if err != nil {
+		return nil, err
 	}
-	messages, err := a.store.ListMessages(threadID)
+	messages, err := store.ListMessages(threadID)
 	if err != nil {
 		return nil, err
 	}
@@ -200,36 +274,39 @@ func (a *App) GetMessages(threadID string) ([]db.Message, error) {
 
 // SetThreadModel changes the model used by one thread.
 func (a *App) SetThreadModel(threadID, model string) error {
-	if a.store == nil {
-		return errors.New("database unavailable")
+	store, err := a.threadStore(threadID)
+	if err != nil {
+		return err
 	}
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return errors.New("model is required")
 	}
-	return a.store.SetThreadModel(threadID, model)
+	return store.SetThreadModel(threadID, model)
 }
 
 // SetThreadWebTools turns web search and fetch on or off for one thread.
 func (a *App) SetThreadWebTools(threadID string, enabled bool) error {
-	if a.store == nil {
-		return errors.New("database unavailable")
+	store, err := a.threadStore(threadID)
+	if err != nil {
+		return err
 	}
-	return a.store.SetThreadWebTools(threadID, enabled)
+	return store.SetThreadWebTools(threadID, enabled)
 }
 
 // SetThreadSettings changes one thread's system prompt and generation
 // settings. Nil values use the provider default.
 func (a *App) SetThreadSettings(threadID string, settings db.ThreadSettings) error {
-	if a.store == nil {
-		return errors.New("database unavailable")
+	store, err := a.threadStore(threadID)
+	if err != nil {
+		return err
 	}
 	settings.SystemPrompt = strings.TrimSpace(settings.SystemPrompt)
 	settings.ReasoningEffort = strings.TrimSpace(settings.ReasoningEffort)
 	if err := validateThreadSettings(settings); err != nil {
 		return err
 	}
-	return a.store.SetThreadSettings(threadID, settings)
+	return store.SetThreadSettings(threadID, settings)
 }
 
 func validateThreadSettings(s db.ThreadSettings) error {
@@ -258,22 +335,30 @@ func validateThreadSettings(s db.ThreadSettings) error {
 
 // RenameThread sets a user-provided title.
 func (a *App) RenameThread(threadID, title string) error {
-	if a.store == nil {
-		return errors.New("database unavailable")
+	store, err := a.threadStore(threadID)
+	if err != nil {
+		return err
 	}
 	title = strings.Join(strings.Fields(title), " ")
 	if title == "" {
 		return errors.New("title is required")
 	}
-	return a.store.UpdateThreadMeta(threadID, truncateRunes(title, 120), time.Now().UnixMilli())
+	return store.UpdateThreadMeta(threadID, truncateRunes(title, 120), time.Now().UnixMilli())
 }
 
 // DeleteThread removes a thread and its messages.
 func (a *App) DeleteThread(threadID string) error {
-	if a.store == nil {
-		return errors.New("database unavailable")
+	store, err := a.threadStore(threadID)
+	if err != nil {
+		return err
 	}
-	return a.store.DeleteThread(threadID)
+	if err := store.DeleteThread(threadID); err != nil {
+		return err
+	}
+	a.tempMu.Lock()
+	delete(a.tempIDs, threadID)
+	a.tempMu.Unlock()
+	return nil
 }
 
 // ListModels fetches available model identifiers for the provider settings the
@@ -302,7 +387,7 @@ func (a *App) SendMessage(threadID, content string, attachments []db.AttachmentI
 	a.sendMu.Lock()
 	defer a.sendMu.Unlock()
 
-	thread, cfg, model, err := a.prepareReply(threadID)
+	thread, cfg, model, store, err := a.prepareReply(threadID)
 	if err != nil {
 		return err
 	}
@@ -320,11 +405,11 @@ func (a *App) SendMessage(threadID, content string, attachments []db.AttachmentI
 		Attachments: files,
 		CreatedAt:   now,
 	}
-	if err := a.store.AddMessage(userMessage); err != nil {
+	if err := store.AddMessage(userMessage); err != nil {
 		return err
 	}
 
-	return a.streamReply(thread, cfg, model)
+	return a.streamReply(thread, cfg, model, store)
 }
 
 // CancelReply stops the reply that is currently streaming. Text received so
@@ -358,12 +443,12 @@ func (a *App) RegenerateReply(threadID string) error {
 	a.sendMu.Lock()
 	defer a.sendMu.Unlock()
 
-	thread, cfg, model, err := a.prepareReply(threadID)
+	thread, cfg, model, store, err := a.prepareReply(threadID)
 	if err != nil {
 		return err
 	}
 
-	messages, err := a.store.ListMessages(threadID)
+	messages, err := store.ListMessages(threadID)
 	if err != nil {
 		return err
 	}
@@ -378,12 +463,12 @@ func (a *App) RegenerateReply(threadID string) error {
 		return errors.New("no user message to regenerate")
 	}
 	if lastUser < len(messages)-1 {
-		if err := a.store.DeleteMessagesAfter(threadID, messages[lastUser].ID); err != nil {
+		if err := store.DeleteMessagesAfter(threadID, messages[lastUser].ID); err != nil {
 			return err
 		}
 	}
 
-	return a.streamReply(thread, cfg, model)
+	return a.streamReply(thread, cfg, model, store)
 }
 
 // EditMessage replaces a user message's text, discards that message's reply and
@@ -394,12 +479,12 @@ func (a *App) EditMessage(threadID, messageID, content string) error {
 	a.sendMu.Lock()
 	defer a.sendMu.Unlock()
 
-	thread, cfg, model, err := a.prepareReply(threadID)
+	thread, cfg, model, store, err := a.prepareReply(threadID)
 	if err != nil {
 		return err
 	}
 
-	messages, err := a.store.ListMessages(threadID)
+	messages, err := store.ListMessages(threadID)
 	if err != nil {
 		return err
 	}
@@ -420,54 +505,55 @@ func (a *App) EditMessage(threadID, messageID, content string) error {
 		return errors.New("message is empty")
 	}
 
-	if err := a.store.UpdateMessageContent(messageID, content); err != nil {
+	if err := store.UpdateMessageContent(messageID, content); err != nil {
 		return err
 	}
 	if target < len(messages)-1 {
-		if err := a.store.DeleteMessagesAfter(threadID, messageID); err != nil {
+		if err := store.DeleteMessagesAfter(threadID, messageID); err != nil {
 			return err
 		}
 	}
 
-	return a.streamReply(thread, cfg, model)
+	return a.streamReply(thread, cfg, model, store)
 }
 
 // prepareReply validates the app, thread and provider settings before a
 // streaming request.
-func (a *App) prepareReply(threadID string) (db.Thread, config.Config, string, error) {
+func (a *App) prepareReply(threadID string) (db.Thread, config.Config, string, *db.Store, error) {
 	if a.ctx == nil {
-		return db.Thread{}, config.Config{}, "", errors.New("app is not ready")
+		return db.Thread{}, config.Config{}, "", nil, errors.New("app is not ready")
 	}
-	if a.store == nil {
-		return db.Thread{}, config.Config{}, "", errors.New("database unavailable")
+	store, err := a.threadStore(threadID)
+	if err != nil {
+		return db.Thread{}, config.Config{}, "", nil, err
 	}
 
-	thread, err := a.store.GetThread(threadID)
+	thread, err := store.GetThread(threadID)
 	if err != nil {
-		return db.Thread{}, config.Config{}, "", err
+		return db.Thread{}, config.Config{}, "", nil, err
 	}
 
 	cfg, err := a.config.Load()
 	if err != nil {
-		return db.Thread{}, config.Config{}, "", err
+		return db.Thread{}, config.Config{}, "", nil, err
 	}
 	if cfg.BaseURL == "" {
-		return db.Thread{}, config.Config{}, "", errors.New("set a base URL in settings")
+		return db.Thread{}, config.Config{}, "", nil, errors.New("set a base URL in settings")
 	}
 	model := strings.TrimSpace(thread.Model)
 	if model == "" {
 		model = strings.TrimSpace(cfg.ChatModel)
 	}
 	if model == "" {
-		return db.Thread{}, config.Config{}, "", errors.New("set a chat model in settings")
+		return db.Thread{}, config.Config{}, "", nil, errors.New("set a chat model in settings")
 	}
-	return thread, cfg, model, nil
+	return thread, cfg, model, store, nil
 }
 
 // streamReply sends the thread's history to the model, persists the assistant
 // message, emits chat:done and then starts the title request.
-func (a *App) streamReply(thread db.Thread, cfg config.Config, model string) error {
-	history, err := a.store.ListMessages(thread.ID)
+func (a *App) streamReply(thread db.Thread, cfg config.Config, model string, store *db.Store) error {
+	history, err := store.ListMessages(thread.ID)
 	if err != nil {
 		return err
 	}
@@ -569,10 +655,10 @@ func (a *App) streamReply(thread db.Thread, cfg config.Config, model string) err
 		Tools:            steps,
 		CreatedAt:        time.Now().UnixMilli(),
 	}
-	if err := a.store.AddMessage(assistantMessage); err != nil {
+	if err := store.AddMessage(assistantMessage); err != nil {
 		return err
 	}
-	if err := a.store.TouchThread(thread.ID, time.Now().UnixMilli()); err != nil {
+	if err := store.TouchThread(thread.ID, time.Now().UnixMilli()); err != nil {
 		return err
 	}
 
@@ -581,7 +667,8 @@ func (a *App) streamReply(thread db.Thread, cfg config.Config, model string) err
 		Message:  assistantMessage,
 	})
 
-	if !stopped && (thread.Title == "" || thread.Title == defaultThreadTitle) {
+	if !stopped && !a.isTemporaryThread(thread.ID) &&
+		(thread.Title == "" || thread.Title == defaultThreadTitle) {
 		a.queueTitle(thread, cfg, model, lastUserTitleSource(history))
 	}
 	return nil

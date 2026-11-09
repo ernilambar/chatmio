@@ -27,6 +27,7 @@
 
   let {
     thread,
+    temporary = false,
     messages,
     streaming,
     streamText,
@@ -54,6 +55,7 @@
     onshowsidebar
   }: {
     thread: db.Thread | null
+    temporary?: boolean
     messages: db.Message[]
     streaming: boolean
     streamText: string
@@ -348,6 +350,15 @@
 
       <div class="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted">
         <span>{messages.length} {messages.length === 1 ? 'message' : 'messages'}</span>
+        {#if temporary}
+          <span>·</span>
+          <span
+            class="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-amber-500"
+            title="Messages in this chat are not saved to disk"
+          >
+            Not saved
+          </span>
+        {/if}
         {#if thread}
           <span>·</span>
           <span>Model</span>
@@ -432,7 +443,11 @@
     {#if messages.length === 0 && !streaming}
       <div class="flex h-full flex-col items-center justify-center gap-2 text-muted">
         <MessageSquare size={28} />
-        <p class="text-sm">Send a message to start the conversation.</p>
+        <p class="text-sm">
+          {temporary
+            ? 'Temporary chat. Messages are not saved.'
+            : 'Send a message to start the conversation.'}
+        </p>
       </div>
     {:else}
       <div class="mx-auto w-full max-w-3xl space-y-5">
