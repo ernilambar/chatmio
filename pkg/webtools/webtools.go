@@ -24,8 +24,8 @@ const (
 	FetchTool  = "web_fetch"
 
 	searchResults    = 2
-	maxResultRunes   = 2000
-	maxPageRunes     = 20000
+	maxResultRunes   = 1000
+	maxPageRunes     = 8000
 	maxResponseBytes = 4 << 20
 	requestTimeout   = 30 * time.Second
 )
