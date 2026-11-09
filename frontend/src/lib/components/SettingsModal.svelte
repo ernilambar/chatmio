@@ -23,6 +23,10 @@
   let titleModel = $state('')
   let systemPrompt = $state('')
   let contextWindow = $state<number | null>(null)
+  let temperature = $state<number | null>(null)
+  let topP = $state<number | null>(null)
+  let maxTokens = $state<number | null>(null)
+  let frequencyPenalty = $state<number | null>(null)
   let models = $state<string[]>([])
   let modelsLoading = $state(false)
   let modelsError = $state<string | null>(null)
@@ -44,6 +48,10 @@
       titleModel = cfg.titleModel
       systemPrompt = cfg.systemPrompt
       contextWindow = cfg.contextWindow || null
+      temperature = cfg.temperature ?? null
+      topP = cfg.topP ?? null
+      maxTokens = cfg.maxTokens ?? null
+      frequencyPenalty = cfg.frequencyPenalty ?? null
       error = null
       untrack(() => void loadModels())
     }
@@ -73,6 +81,10 @@
     }
   }
 
+  function optional(value: number | null): number | undefined {
+    return value === null || Number.isNaN(value) ? undefined : value
+  }
+
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault()
     if (!chatModel.trim()) {
@@ -89,7 +101,11 @@
           chatModel,
           titleModel,
           systemPrompt,
-          contextWindow: contextWindow && contextWindow > 0 ? Math.floor(contextWindow) : 0
+          contextWindow: contextWindow && contextWindow > 0 ? Math.floor(contextWindow) : 0,
+          temperature: optional(temperature),
+          topP: optional(topP),
+          maxTokens: optional(maxTokens),
+          frequencyPenalty: optional(frequencyPenalty)
         })
       )
       onclose()
@@ -221,6 +237,62 @@
           />
           <span class="text-[11px] text-muted">Used for the context warning. Chats can override it.</span>
         </label>
+
+        <p class="text-xs text-muted">Generation defaults</p>
+
+        <div class="grid grid-cols-2 gap-3">
+          <label class="block space-y-1">
+            <span class="text-xs text-muted">Temperature</span>
+            <input
+              bind:value={temperature}
+              type="number"
+              min="0"
+              max="2"
+              step="0.1"
+              class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+              placeholder="Provider default"
+            />
+          </label>
+          <label class="block space-y-1">
+            <span class="text-xs text-muted">Top P</span>
+            <input
+              bind:value={topP}
+              type="number"
+              min="0.01"
+              max="1"
+              step="0.05"
+              class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+              placeholder="Provider default"
+            />
+          </label>
+          <label class="block space-y-1">
+            <span class="text-xs text-muted">Max output tokens</span>
+            <input
+              bind:value={maxTokens}
+              type="number"
+              min="1"
+              step="1"
+              class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+              placeholder="Provider default"
+            />
+          </label>
+          <label class="block space-y-1">
+            <span class="text-xs text-muted">Frequency penalty</span>
+            <input
+              bind:value={frequencyPenalty}
+              type="number"
+              min="-2"
+              max="2"
+              step="0.1"
+              class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+              placeholder="Provider default"
+            />
+          </label>
+        </div>
+        <p class="text-[11px] text-muted">
+          Copied into new chats. Existing chats keep their settings; clear a value in chat settings to
+          use the provider default.
+        </p>
       </div>
 
       {#if error}

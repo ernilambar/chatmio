@@ -7,6 +7,10 @@ export namespace config {
 	    titleModel: string;
 	    systemPrompt: string;
 	    contextWindow: number;
+	    temperature?: number;
+	    topP?: number;
+	    maxTokens?: number;
+	    frequencyPenalty?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -20,6 +24,10 @@ export namespace config {
 	        this.titleModel = source["titleModel"];
 	        this.systemPrompt = source["systemPrompt"];
 	        this.contextWindow = source["contextWindow"];
+	        this.temperature = source["temperature"];
+	        this.topP = source["topP"];
+	        this.maxTokens = source["maxTokens"];
+	        this.frequencyPenalty = source["frequencyPenalty"];
 	    }
 	}
 

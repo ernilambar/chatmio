@@ -34,10 +34,12 @@ The app is ad-hoc signed, so removing the quarantine attribute is required after
 
 ## Configuration
 
-Open Settings (⌘,) and set the base URL, API key, chat model, and optional title model or system
-prompt. Settings and chat history are stored in the OS app data directory:
+Open Settings (⌘,) and set the base URL, API key, chat model, and optional title model, system
+prompt, context window, and generation defaults (temperature, top P, max tokens, frequency
+penalty). Defaults are copied into new chats; each chat can override or clear them. Settings and
+chat history are stored in the OS app data directory:
 
-- `config.json`: base URL, models, system prompt, and API key.
+- `config.json`: base URL, models, system prompt, API key, and generation defaults.
 - `chats.db`: threads, messages, and attachments.
 
 API keys are stored in plain text in `config.json` for now; OS keychain support is planned.

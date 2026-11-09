@@ -117,6 +117,14 @@ func (a *App) SaveConfig(cfg config.Config) error {
 	if cfg.ContextWindow < 0 {
 		return errors.New("context window must be zero or more")
 	}
+	if err := validateThreadSettings(db.ThreadSettings{
+		Temperature:      cfg.Temperature,
+		TopP:             cfg.TopP,
+		MaxTokens:        cfg.MaxTokens,
+		FrequencyPenalty: cfg.FrequencyPenalty,
+	}); err != nil {
+		return err
+	}
 	return a.config.Save(cfg)
 }
 
@@ -147,12 +155,18 @@ func (a *App) CreateThread() (db.Thread, error) {
 		return db.Thread{}, err
 	}
 	now := time.Now().UnixMilli()
+	// Snapshot the generation defaults so later config edits do not change
+	// existing chats.
 	thread := db.Thread{
-		ID:        uuid.NewString(),
-		Title:     defaultThreadTitle,
-		Model:     strings.TrimSpace(cfg.ChatModel),
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:               uuid.NewString(),
+		Title:            defaultThreadTitle,
+		Model:            strings.TrimSpace(cfg.ChatModel),
+		Temperature:      cfg.Temperature,
+		TopP:             cfg.TopP,
+		MaxTokens:        cfg.MaxTokens,
+		FrequencyPenalty: cfg.FrequencyPenalty,
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}
 	if err := a.store.CreateThread(thread); err != nil {
 		return db.Thread{}, err

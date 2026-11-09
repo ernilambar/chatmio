@@ -21,6 +21,12 @@ type Config struct {
 	// ContextWindow is the default model context size in tokens used for the
 	// context warning. Zero disables the warning unless a chat sets its own.
 	ContextWindow int `json:"contextWindow"`
+	// Generation defaults are copied into new chats. Nil means the provider
+	// default and leaves the field unset in the request.
+	Temperature      *float64 `json:"temperature,omitempty"`
+	TopP             *float64 `json:"topP,omitempty"`
+	MaxTokens        *int     `json:"maxTokens,omitempty"`
+	FrequencyPenalty *float64 `json:"frequencyPenalty,omitempty"`
 }
 
 // Default returns the configuration used on first launch.
