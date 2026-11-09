@@ -11,7 +11,9 @@
     Trash2,
     X
   } from 'lucide-svelte'
+  import { onMount } from 'svelte'
   import type { db } from '../wailsjs/go/models'
+  import Markdown from './Markdown.svelte'
 
   let {
     thread,
@@ -82,7 +84,12 @@
       renaming = false
       confirmingDelete = false
       editing = null
+      inputEl?.focus()
     }
+  })
+
+  onMount(() => {
+    inputEl?.focus()
   })
 
   $effect(() => {
@@ -118,6 +125,7 @@
     draft = ''
     files = []
     onsend(content, selected)
+    inputEl?.focus()
   }
 
   function handleKeydown(event: KeyboardEvent): void {
@@ -338,7 +346,7 @@
                 </div>
               {/if}
               {#if message.content}
-                <div class="whitespace-pre-wrap">{message.content}</div>
+                <Markdown content={message.content} />
               {/if}
             </div>
             <div
@@ -383,7 +391,7 @@
           <div class="flex justify-start">
             <div class="max-w-[80%] rounded-lg bg-panel px-3 py-2 text-sm leading-relaxed">
               {#if streamText}
-                <div class="whitespace-pre-wrap">{streamText}</div>
+                <Markdown content={streamText} />
               {:else}
                 <div class="flex items-center gap-2 text-muted">
                   <Loader2 class="animate-spin" size={14} />

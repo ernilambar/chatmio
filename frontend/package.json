@@ -21,6 +21,8 @@
     "vite": "^8.0.13"
   },
   "dependencies": {
-    "lucide-svelte": "^1.0.1"
+    "dompurify": "^3.4.17",
+    "lucide-svelte": "^1.0.1",
+    "marked": "^18.1.3"
   }
 }

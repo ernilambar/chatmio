@@ -13,6 +13,7 @@ the chat model when it is unset or returns no title.
 - Rename and delete chats, copy messages, and automatic titles with a local fallback.
 - Retry a failed turn, regenerate the last reply, and edit any user message in the composer.
 - Animated thinking indicator while a reply streams; generated titles appear in the sidebar.
+- Replies render as GitHub-flavored Markdown with headings, lists, tables, code blocks, and safe external links.
 
 ## Stack
 
