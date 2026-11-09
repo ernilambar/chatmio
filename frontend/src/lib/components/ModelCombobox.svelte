@@ -37,6 +37,15 @@
     if (focused instanceof HTMLElement && root?.contains(focused)) focused.blur()
   }
 
+  function selectOption(event: MouseEvent, model: string): void {
+    // WKWebView retargets the click's default activation to the trigger button
+    // once the focused option is removed, which reopens the popup. Cancel the
+    // default and stop the event before closing.
+    event.preventDefault()
+    event.stopPropagation()
+    choose(model)
+  }
+
   function toggle(): void {
     open = !open
     if (open) query = ''
@@ -84,7 +93,7 @@
           <button
             type="button"
             class="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-panel"
-            onclick={() => choose('')}
+            onclick={(event) => selectOption(event, '')}
           >
             <span>{emptyLabel}</span>
             {#if value === ''}<Check size={14} />{/if}
@@ -94,7 +103,7 @@
           <button
             type="button"
             class="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-panel"
-            onclick={() => choose(model)}
+            onclick={(event) => selectOption(event, model)}
           >
             <span class="truncate">{model}</span>
             {#if value === model}<Check size={14} />{/if}
