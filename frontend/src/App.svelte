@@ -7,11 +7,31 @@
   import { chat } from './lib/stores/chat.svelte'
   import { disableTextAssist } from './lib/disable-autosuggest'
 
+  const SIDEBAR_KEY = 'chattu.sidebar.visible'
+
+  function readSidebarVisible(): boolean {
+    try {
+      return localStorage.getItem(SIDEBAR_KEY) !== 'false'
+    } catch {
+      return true
+    }
+  }
+
   let settingsOpen = $state(false)
   let searchOpen = $state(false)
   let composerFocus = $state(0)
+  let sidebarOpen = $state(readSidebarVisible())
 
   const activeThread = $derived(chat.activeThread)
+
+  function toggleSidebar(): void {
+    sidebarOpen = !sidebarOpen
+    try {
+      localStorage.setItem(SIDEBAR_KEY, String(sidebarOpen))
+    } catch {
+      // Persistence is best-effort; the toggle still works for this session.
+    }
+  }
 
   onMount(() => {
     const stopTextAssist = disableTextAssist()
@@ -63,14 +83,17 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="flex h-full">
-  <Sidebar
-    threads={chat.threads}
-    activeId={chat.activeId}
-    oncreate={() => chat.createThread()}
-    onselect={(id) => chat.select(id)}
-    onsettings={() => (settingsOpen = true)}
-    onsearch={() => (searchOpen = true)}
-  />
+  {#if sidebarOpen}
+    <Sidebar
+      threads={chat.threads}
+      activeId={chat.activeId}
+      oncreate={() => chat.createThread()}
+      onselect={(id) => chat.select(id)}
+      onsettings={() => (settingsOpen = true)}
+      onsearch={() => (searchOpen = true)}
+      onhide={toggleSidebar}
+    />
+  {/if}
   <ChatWindow
     thread={activeThread}
     messages={chat.messages}
@@ -79,6 +102,8 @@
     error={chat.error}
     models={chat.models}
     defaultModel={chat.config?.chatModel ?? ''}
+    sidebarHidden={!sidebarOpen}
+    onshowsidebar={toggleSidebar}
     onsend={(content, files) => chat.send(content, files)}
     onretry={() => chat.retry()}
     canRetry={chat.canRetry}

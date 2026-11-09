@@ -5,6 +5,7 @@
     Copy,
     Loader2,
     MessageSquare,
+    PanelLeft,
     Paperclip,
     Pencil,
     RotateCcw,
@@ -35,7 +36,9 @@
     ondelete,
     onmodelchange,
     oncancel,
-    focusNonce = 0
+    focusNonce = 0,
+    sidebarHidden = false,
+    onshowsidebar
   }: {
     thread: db.Thread | null
     messages: db.Message[]
@@ -54,6 +57,8 @@
     onmodelchange: (model: string) => Promise<void> | void
     oncancel: () => void
     focusNonce?: number
+    sidebarHidden?: boolean
+    onshowsidebar?: () => void
   } = $props()
 
   let draft = $state('')
@@ -251,6 +256,15 @@
 
 <main class="flex min-w-0 flex-1 flex-col">
   <header class="flex items-start justify-between gap-3 border-b border-line px-6 py-3">
+    {#if sidebarHidden}
+      <button
+        class="-ml-2 shrink-0 rounded-md p-1 text-muted transition-colors hover:bg-panel hover:text-fg"
+        title="Show sidebar"
+        onclick={() => onshowsidebar?.()}
+      >
+        <PanelLeft size={16} />
+      </button>
+    {/if}
     <div class="min-w-0 flex-1">
       {#if renaming}
         <input

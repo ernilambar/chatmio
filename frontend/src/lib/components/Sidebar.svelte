@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { MessageSquare, Plus, Search, Settings } from 'lucide-svelte'
+  import { MessageSquare, PanelLeftClose, Plus, Search, Settings } from 'lucide-svelte'
   import type { db } from '../wailsjs/go/models'
 
   let {
@@ -8,7 +8,8 @@
     oncreate,
     onselect,
     onsettings,
-    onsearch
+    onsearch,
+    onhide
   }: {
     threads: db.Thread[]
     activeId: string | null
@@ -16,6 +17,7 @@
     onselect: (id: string) => void
     onsettings: () => void
     onsearch: () => void
+    onhide: () => void
   } = $props()
 </script>
 
@@ -23,6 +25,13 @@
   <div class="flex items-center justify-between px-3 py-3">
     <span class="px-1 text-sm font-semibold tracking-wide">Chattu</span>
     <div class="flex items-center gap-0.5">
+      <button
+        class="rounded-md p-1.5 text-muted transition-colors hover:bg-surface hover:text-fg"
+        title="Hide sidebar"
+        onclick={onhide}
+      >
+        <PanelLeftClose size={16} />
+      </button>
       <button
         class="rounded-md p-1.5 text-muted transition-colors hover:bg-surface hover:text-fg"
         title="Search chats (⌘K)"
