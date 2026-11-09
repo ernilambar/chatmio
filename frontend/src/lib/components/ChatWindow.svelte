@@ -358,7 +358,7 @@
           >
             <div
               class="{message.role === 'user'
-                ? 'max-w-[80%] rounded-2xl rounded-br-md bg-accent px-4 py-2.5 text-sm leading-relaxed text-white'
+                ? 'max-w-[80%] rounded-2xl rounded-br-md bg-bubble px-4 py-2.5 text-sm leading-relaxed text-fg'
                 : 'w-full min-w-0 py-0.5 text-sm leading-relaxed'}"
             >
               {#if message.attachments?.length}
@@ -371,7 +371,7 @@
                         class="max-h-56 max-w-full rounded-md object-contain"
                       />
                     {:else}
-                      <span class="inline-flex max-w-full items-center gap-1 rounded-md bg-black/10 px-2 py-1 text-xs">
+                      <span class="inline-flex max-w-full items-center gap-1 rounded-md bg-fg/10 px-2 py-1 text-xs">
                         <Paperclip size={12} class="shrink-0" />
                         <span class="truncate">{attachment.name}</span>
                         <span class="shrink-0 opacity-60">{formatSize(attachment.size)}</span>
@@ -391,7 +391,7 @@
               >
               {#if message.content}
                 <button
-                  class="rounded-md p-1 transition-colors {message.role === 'user' ? 'text-white/70 hover:text-white' : 'text-muted hover:text-fg'}"
+                  class="rounded-md p-1 text-muted transition-colors hover:text-fg"
                   title="Copy message"
                   onclick={() => void copyMessage(message)}
                 >
@@ -404,7 +404,7 @@
               {/if}
               {#if message.role === 'user' && !streaming}
                 <button
-                  class="rounded-md p-1 text-white transition-colors hover:text-white"
+                  class="rounded-md p-1 text-muted transition-colors hover:text-fg"
                   title="Edit message"
                   onclick={() => startEdit(message)}
                 >
