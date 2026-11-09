@@ -154,3 +154,28 @@ export namespace db {
 
 }
 
+export namespace main {
+	
+	export class AboutInfo {
+	    title: string;
+	    version: string;
+	    description: string;
+	    copyright: string;
+	    icon: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AboutInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.version = source["version"];
+	        this.description = source["description"];
+	        this.copyright = source["copyright"];
+	        this.icon = source["icon"];
+	    }
+	}
+
+}
+

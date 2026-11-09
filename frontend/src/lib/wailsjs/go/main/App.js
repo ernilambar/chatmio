@@ -18,6 +18,10 @@ export function EditMessage(arg1, arg2, arg3) {
   return window['go']['main']['App']['EditMessage'](arg1, arg2, arg3);
 }
 
+export function GetAboutInfo() {
+  return window['go']['main']['App']['GetAboutInfo']();
+}
+
 export function GetConfig() {
   return window['go']['main']['App']['GetConfig']();
 }

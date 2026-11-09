@@ -4,6 +4,8 @@
   import ChatWindow from './lib/components/ChatWindow.svelte'
   import SearchPalette from './lib/components/SearchPalette.svelte'
   import SettingsModal from './lib/components/SettingsModal.svelte'
+  import AboutModal from './lib/components/AboutModal.svelte'
+  import { EventsOn } from './lib/wailsjs/runtime/runtime'
   import { chat } from './lib/stores/chat.svelte'
   import { disableTextAssist } from './lib/disable-autosuggest'
 
@@ -19,6 +21,7 @@
 
   let settingsOpen = $state(false)
   let searchOpen = $state(false)
+  let aboutOpen = $state(false)
   let composerFocus = $state(0)
   let sidebarOpen = $state(readSidebarVisible())
 
@@ -35,10 +38,14 @@
 
   onMount(() => {
     const stopTextAssist = disableTextAssist()
+    const stopAbout = EventsOn('app:about', () => {
+      aboutOpen = true
+    })
     chat.init().catch((err) => {
       chat.error = err instanceof Error ? err.message : String(err)
     })
     return () => {
+      stopAbout()
       stopTextAssist()
       chat.destroy()
     }
@@ -78,6 +85,7 @@
       !event.defaultPrevented &&
       !settingsOpen &&
       !searchOpen &&
+      !aboutOpen &&
       chat.streaming
     ) {
       void chat.cancel()
@@ -135,3 +143,5 @@
   onclose={() => (settingsOpen = false)}
   onsave={(next) => chat.saveConfig(next)}
 />
+
+<AboutModal open={aboutOpen} onclose={() => (aboutOpen = false)} />

@@ -27,6 +27,7 @@ func main() {
 		},
 		OnStartup:  app.startup,
 		OnShutdown: app.shutdown,
+		Menu:       applicationMenu(app),
 		Bind: []interface{}{
 			app,
 		},
