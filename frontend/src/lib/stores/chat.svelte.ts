@@ -104,8 +104,10 @@ class ChatStore {
     this.config = await GetConfig()
     this.listen()
     this.threads = await ListThreads()
+    // Open on a fresh chat; reuse the latest thread if it is still empty so
+    // launches don't accumulate blank threads.
     const first = this.threads[0]
-    if (first) {
+    if (first && (await GetMessages(first.id)).length === 0) {
       await this.select(first.id)
     } else {
       await this.createThread()
