@@ -23,7 +23,7 @@ const (
 	SearchTool = "web_search"
 	FetchTool  = "web_fetch"
 
-	searchResults    = 5
+	searchResults    = 2
 	maxResultRunes   = 2000
 	maxPageRunes     = 20000
 	maxResponseBytes = 4 << 20
