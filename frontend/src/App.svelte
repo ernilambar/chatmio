@@ -34,6 +34,10 @@
     models={chat.models}
     defaultModel={chat.config?.chatModel ?? ''}
     onsend={(content, files) => chat.send(content, files)}
+    onretry={() => chat.retry()}
+    canRetry={chat.canRetry}
+    onregenerate={() => chat.regenerate()}
+    onedit={(id, content) => chat.edit(id, content)}
     onrename={(id, title) => chat.renameThread(id, title)}
     ondelete={(id) => chat.deleteThread(id)}
     onmodelchange={(model) => chat.setThreadModel(model)}

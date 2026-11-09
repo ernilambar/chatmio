@@ -30,6 +30,7 @@ const (
 	defaultMaxTokens       = 2048
 	titleTemperature       = 0.2
 	titleMaxTokens         = 32
+	titleTimeout           = 30 * time.Second
 	titlePrompt            = "Generate a short title for this conversation. Reply with only the title: 3 to 6 words, no quotes, no trailing punctuation."
 	maxAttachments         = 10
 	maxAttachmentBytes     = 10 << 20
@@ -45,6 +46,12 @@ type App struct {
 	config  *config.Manager
 	store   *db.Store
 	sendMu  sync.Mutex
+
+	// Title requests run after the reply is delivered so they never delay it.
+	titleMu sync.Mutex
+	titling map[string]bool
+	closed  bool
+	titleWg sync.WaitGroup
 }
 
 // NewApp builds the application services.
@@ -62,6 +69,7 @@ func NewApp() *App {
 	return &App{
 		dataDir: dataDir,
 		config:  config.NewManager(filepath.Join(dataDir, "config.json")),
+		titling: make(map[string]bool),
 	}
 }
 
@@ -83,6 +91,10 @@ func (a *App) startup(ctx context.Context) {
 
 // shutdown is called by Wails before the application exits.
 func (a *App) shutdown(context.Context) {
+	a.titleMu.Lock()
+	a.closed = true
+	a.titleMu.Unlock()
+	a.titleWg.Wait()
 	if err := a.store.Close(); err != nil {
 		log.Printf("app: close database: %v", err)
 	}
@@ -213,34 +225,13 @@ func (a *App) SendMessage(threadID, content string, attachments []db.AttachmentI
 	if content == "" && len(attachments) == 0 {
 		return errors.New("message is empty")
 	}
-	if a.ctx == nil {
-		return errors.New("app is not ready")
-	}
-	if a.store == nil {
-		return errors.New("database unavailable")
-	}
 
 	a.sendMu.Lock()
 	defer a.sendMu.Unlock()
 
-	thread, err := a.store.GetThread(threadID)
+	thread, cfg, model, err := a.prepareReply(threadID)
 	if err != nil {
 		return err
-	}
-
-	cfg, err := a.config.Load()
-	if err != nil {
-		return err
-	}
-	if cfg.BaseURL == "" {
-		return errors.New("set a base URL in settings")
-	}
-	model := strings.TrimSpace(thread.Model)
-	if model == "" {
-		model = strings.TrimSpace(cfg.ChatModel)
-	}
-	if model == "" {
-		return errors.New("set a chat model in settings")
 	}
 
 	now := time.Now().UnixMilli()
@@ -260,10 +251,130 @@ func (a *App) SendMessage(threadID, content string, attachments []db.AttachmentI
 		return err
 	}
 
-	history, err := a.store.ListMessages(threadID)
+	return a.streamReply(thread, cfg, model)
+}
+
+// RegenerateReply discards the trailing assistant reply, if any, and streams a
+// new reply for the last user message. It also retries a send that failed
+// before any assistant reply was stored.
+func (a *App) RegenerateReply(threadID string) error {
+	a.sendMu.Lock()
+	defer a.sendMu.Unlock()
+
+	thread, cfg, model, err := a.prepareReply(threadID)
 	if err != nil {
 		return err
 	}
+
+	messages, err := a.store.ListMessages(threadID)
+	if err != nil {
+		return err
+	}
+	lastUser := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == string(ai.RoleUser) {
+			lastUser = i
+			break
+		}
+	}
+	if lastUser < 0 {
+		return errors.New("no user message to regenerate")
+	}
+	if lastUser < len(messages)-1 {
+		if err := a.store.DeleteMessagesAfter(threadID, messages[lastUser].ID); err != nil {
+			return err
+		}
+	}
+
+	return a.streamReply(thread, cfg, model)
+}
+
+// EditMessage replaces a user message's text, discards that message's reply and
+// everything after it, then streams a fresh reply. Attachments are preserved.
+func (a *App) EditMessage(threadID, messageID, content string) error {
+	content = strings.TrimSpace(content)
+
+	a.sendMu.Lock()
+	defer a.sendMu.Unlock()
+
+	thread, cfg, model, err := a.prepareReply(threadID)
+	if err != nil {
+		return err
+	}
+
+	messages, err := a.store.ListMessages(threadID)
+	if err != nil {
+		return err
+	}
+	target := -1
+	for i := range messages {
+		if messages[i].ID == messageID {
+			target = i
+			break
+		}
+	}
+	if target < 0 {
+		return errors.New("message not found")
+	}
+	if messages[target].Role != string(ai.RoleUser) {
+		return errors.New("only user messages can be edited")
+	}
+	if content == "" && len(messages[target].Attachments) == 0 {
+		return errors.New("message is empty")
+	}
+
+	if err := a.store.UpdateMessageContent(messageID, content); err != nil {
+		return err
+	}
+	if target < len(messages)-1 {
+		if err := a.store.DeleteMessagesAfter(threadID, messageID); err != nil {
+			return err
+		}
+	}
+
+	return a.streamReply(thread, cfg, model)
+}
+
+// prepareReply validates the app, thread and provider settings before a
+// streaming request.
+func (a *App) prepareReply(threadID string) (db.Thread, config.Config, string, error) {
+	if a.ctx == nil {
+		return db.Thread{}, config.Config{}, "", errors.New("app is not ready")
+	}
+	if a.store == nil {
+		return db.Thread{}, config.Config{}, "", errors.New("database unavailable")
+	}
+
+	thread, err := a.store.GetThread(threadID)
+	if err != nil {
+		return db.Thread{}, config.Config{}, "", err
+	}
+
+	cfg, err := a.config.Load()
+	if err != nil {
+		return db.Thread{}, config.Config{}, "", err
+	}
+	if cfg.BaseURL == "" {
+		return db.Thread{}, config.Config{}, "", errors.New("set a base URL in settings")
+	}
+	model := strings.TrimSpace(thread.Model)
+	if model == "" {
+		model = strings.TrimSpace(cfg.ChatModel)
+	}
+	if model == "" {
+		return db.Thread{}, config.Config{}, "", errors.New("set a chat model in settings")
+	}
+	return thread, cfg, model, nil
+}
+
+// streamReply sends the thread's history to the model, persists the assistant
+// message, emits chat:done and then starts the title request.
+func (a *App) streamReply(thread db.Thread, cfg config.Config, model string) error {
+	history, err := a.store.ListMessages(thread.ID)
+	if err != nil {
+		return err
+	}
+
 	prompt := make([]ai.Message, 0, len(history)+1)
 	systemPrompt := thread.SystemPrompt
 	if systemPrompt == "" {
@@ -275,8 +386,6 @@ func (a *App) SendMessage(threadID, content string, attachments []db.AttachmentI
 	for _, m := range history {
 		prompt = append(prompt, toAIMessage(m))
 	}
-
-	needsTitle := thread.Title == "" || thread.Title == defaultThreadTitle
 
 	client := ai.New(cfg.BaseURL, cfg.APIKey, nil)
 	var reply strings.Builder
@@ -290,7 +399,7 @@ func (a *App) SendMessage(threadID, content string, attachments []db.AttachmentI
 	}, func(token string) {
 		reply.WriteString(token)
 		runtime.EventsEmit(a.ctx, "chat:delta", chatDelta{
-			ThreadID: threadID,
+			ThreadID: thread.ID,
 			Delta:    token,
 		})
 	})
@@ -300,7 +409,7 @@ func (a *App) SendMessage(threadID, content string, attachments []db.AttachmentI
 
 	assistantMessage := db.Message{
 		ID:        uuid.NewString(),
-		ThreadID:  threadID,
+		ThreadID:  thread.ID,
 		Role:      string(ai.RoleAssistant),
 		Content:   reply.String(),
 		CreatedAt: time.Now().UnixMilli(),
@@ -308,19 +417,79 @@ func (a *App) SendMessage(threadID, content string, attachments []db.AttachmentI
 	if err := a.store.AddMessage(assistantMessage); err != nil {
 		return err
 	}
-	title := thread.Title
-	if needsTitle {
-		title = a.generateTitle(client, cfg, model, titleSource(content, files))
-	}
-	if err := a.store.UpdateThreadMeta(threadID, title, time.Now().UnixMilli()); err != nil {
+	if err := a.store.TouchThread(thread.ID, time.Now().UnixMilli()); err != nil {
 		return err
 	}
 
 	runtime.EventsEmit(a.ctx, "chat:done", chatDone{
-		ThreadID: threadID,
+		ThreadID: thread.ID,
 		Message:  assistantMessage,
 	})
+
+	if thread.Title == "" || thread.Title == defaultThreadTitle {
+		a.queueTitle(thread, cfg, model, lastUserTitleSource(history))
+	}
 	return nil
+}
+
+// lastUserTitleSource describes the most recent user message for title
+// generation.
+func lastUserTitleSource(messages []db.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == string(ai.RoleUser) {
+			return titleSource(messages[i].Content, messages[i].Attachments)
+		}
+	}
+	return ""
+}
+
+// queueTitle requests a title after the reply is delivered, then announces it
+// through chat:title. At most one request runs per thread, and a user rename
+// always wins over the generated title.
+func (a *App) queueTitle(thread db.Thread, cfg config.Config, model, source string) {
+	if strings.TrimSpace(source) == "" {
+		return
+	}
+
+	a.titleMu.Lock()
+	if a.closed {
+		a.titleMu.Unlock()
+		return
+	}
+	if a.titling == nil {
+		a.titling = make(map[string]bool)
+	}
+	if a.titling[thread.ID] {
+		a.titleMu.Unlock()
+		return
+	}
+	a.titling[thread.ID] = true
+	a.titleWg.Add(1)
+	a.titleMu.Unlock()
+
+	go func() {
+		defer a.titleWg.Done()
+		defer func() {
+			a.titleMu.Lock()
+			delete(a.titling, thread.ID)
+			a.titleMu.Unlock()
+		}()
+
+		client := ai.New(cfg.BaseURL, cfg.APIKey, nil)
+		title := a.generateTitle(client, cfg, model, source)
+		changed, err := a.store.SetThreadTitleIfUnchanged(thread.ID, thread.Title, title)
+		if err != nil {
+			log.Printf("app: set generated title: %v", err)
+			return
+		}
+		if !changed {
+			return
+		}
+		runtime.EventsEmit(a.ctx, "chat:title", chatTitle{
+			ThreadID: thread.ID,
+			Title:    title,
+		})
+	}()
 }
 
 type chatDelta struct {
@@ -331,6 +500,11 @@ type chatDelta struct {
 type chatDone struct {
 	ThreadID string     `json:"threadId"`
 	Message  db.Message `json:"message"`
+}
+
+type chatTitle struct {
+	ThreadID string `json:"threadId"`
+	Title    string `json:"title"`
 }
 
 func normalizeMIME(value string) string {
@@ -501,8 +675,10 @@ func (a *App) generateTitle(client *ai.Client, cfg config.Config, fallbackModel,
 
 	temperature := titleTemperature
 	maxTokens := titleMaxTokens
+	ctx, cancel := context.WithTimeout(a.ctx, titleTimeout)
+	defer cancel()
 	var generated strings.Builder
-	err := client.StreamChat(a.ctx, ai.ChatOptions{
+	err := client.StreamChat(ctx, ai.ChatOptions{
 		Model: model,
 		Messages: []ai.Message{
 			{Role: ai.RoleSystem, Content: titlePrompt},

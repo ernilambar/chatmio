@@ -11,6 +11,8 @@ the chat model when no title model is set.
 - Searchable model picker in settings, populated from the provider's `GET /models`.
 - Image and text-file attachments; unsupported binary files are rejected before sending.
 - Rename and delete chats, copy messages, and automatic titles with a local fallback.
+- Retry a failed turn, regenerate the last reply, and edit any user message in the composer.
+- Animated thinking indicator while a reply streams; generated titles appear in the sidebar.
 
 ## Stack
 

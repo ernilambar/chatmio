@@ -10,6 +10,10 @@ export function DeleteThread(arg1) {
   return window['go']['main']['App']['DeleteThread'](arg1);
 }
 
+export function EditMessage(arg1, arg2, arg3) {
+  return window['go']['main']['App']['EditMessage'](arg1, arg2, arg3);
+}
+
 export function GetConfig() {
   return window['go']['main']['App']['GetConfig']();
 }
@@ -24,6 +28,10 @@ export function ListModels(arg1, arg2) {
 
 export function ListThreads() {
   return window['go']['main']['App']['ListThreads']();
+}
+
+export function RegenerateReply(arg1) {
+  return window['go']['main']['App']['RegenerateReply'](arg1);
 }
 
 export function RenameThread(arg1, arg2) {

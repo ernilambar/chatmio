@@ -1,10 +1,12 @@
 import {
   CreateThread,
   DeleteThread,
+  EditMessage,
   GetConfig,
   GetMessages,
   ListModels,
   ListThreads,
+  RegenerateReply,
   RenameThread,
   SaveConfig,
   SendMessage,
@@ -21,6 +23,11 @@ interface ChatDelta {
 interface ChatDone {
   threadId: string
   message: db.Message
+}
+
+interface ChatTitle {
+  threadId: string
+  title: string
 }
 
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
@@ -76,9 +83,16 @@ class ChatStore {
   error = $state<string | null>(null)
 
   private unsubscribers: Array<() => void> = []
+  private failedSend = $state<{ content: string; files: File[] } | null>(null)
 
   get activeThread(): db.Thread | null {
     return this.threads.find((thread) => thread.id === this.activeId) ?? null
+  }
+
+  get canRetry(): boolean {
+    if (this.streaming) return false
+    const last = this.messages[this.messages.length - 1]
+    return last?.role === 'user' || this.failedSend !== null
   }
 
   get activeModel(): string {
@@ -114,6 +128,16 @@ class ChatStore {
         this.streamText = ''
         this.messages = await GetMessages(payload.threadId)
         this.threads = await ListThreads()
+      }),
+      EventsOn('chat:title', async (payload: ChatTitle) => {
+        this.threads = this.threads.map((thread) =>
+          thread.id === payload.threadId
+            ? db.Thread.createFrom({ ...thread, title: payload.title })
+            : thread
+        )
+        // A reply refresh may still be in flight with the old title; reconcile
+        // once more now that the title is committed.
+        this.threads = await ListThreads()
       })
     )
   }
@@ -138,6 +162,7 @@ class ChatStore {
     this.activeId = thread.id
     this.messages = []
     this.error = null
+    this.failedSend = null
   }
 
   async select(id: string): Promise<void> {
@@ -145,6 +170,7 @@ class ChatStore {
     this.activeId = id
     this.error = null
     this.streamText = ''
+    this.failedSend = null
     this.messages = await GetMessages(id)
   }
 
@@ -156,6 +182,7 @@ class ChatStore {
     this.streaming = true
     this.error = null
     this.streamText = ''
+    this.failedSend = null
 
     let attachments: db.AttachmentInput[]
     try {
@@ -194,6 +221,85 @@ class ChatStore {
 
     try {
       await SendMessage(threadId, content, attachments)
+      this.failedSend = null
+      this.messages = await GetMessages(threadId)
+      this.threads = await ListThreads()
+    } catch (err) {
+      this.error = err instanceof Error ? err.message : String(err)
+      this.failedSend = { content, files }
+      this.streamText = ''
+      this.messages = await GetMessages(threadId)
+    } finally {
+      this.streaming = false
+    }
+  }
+
+  // retry re-runs the failed turn. When the user message was already stored,
+  // only the assistant reply is missing, so regenerate covers it; otherwise the
+  // original prompt and attachments are sent again.
+  async retry(): Promise<void> {
+    if (this.streaming || !this.activeId) return
+    const last = this.messages[this.messages.length - 1]
+    if (last?.role === 'user') {
+      await this.regenerate()
+      return
+    }
+    const failed = this.failedSend
+    if (!failed) return
+    this.failedSend = null
+    await this.send(failed.content, failed.files)
+  }
+
+  // regenerate drops the trailing assistant reply and asks for a new one.
+  async regenerate(): Promise<void> {
+    if (this.streaming || !this.activeId) return
+
+    const threadId = this.activeId
+    this.streaming = true
+    this.error = null
+    this.streamText = ''
+
+    const messages = [...this.messages]
+    while (messages.length > 0 && messages[messages.length - 1].role === 'assistant') {
+      messages.pop()
+    }
+    this.messages = messages
+
+    try {
+      await RegenerateReply(threadId)
+      this.failedSend = null
+      this.messages = await GetMessages(threadId)
+      this.threads = await ListThreads()
+    } catch (err) {
+      this.error = err instanceof Error ? err.message : String(err)
+      this.streamText = ''
+      this.messages = await GetMessages(threadId)
+    } finally {
+      this.streaming = false
+    }
+  }
+
+  // edit replaces a user message, discards everything that followed it and
+  // streams a fresh reply. Attachments are kept by the backend.
+  async edit(messageId: string, content: string): Promise<void> {
+    content = content.trim()
+    if (!content || this.streaming || !this.activeId) return
+
+    const threadId = this.activeId
+    this.streaming = true
+    this.error = null
+    this.streamText = ''
+
+    const index = this.messages.findIndex((message) => message.id === messageId)
+    if (index >= 0) {
+      const next = this.messages.slice(0, index + 1)
+      next[index] = db.Message.createFrom({ ...next[index], content })
+      this.messages = next
+    }
+
+    try {
+      await EditMessage(threadId, messageId, content)
+      this.failedSend = null
       this.messages = await GetMessages(threadId)
       this.threads = await ListThreads()
     } catch (err) {

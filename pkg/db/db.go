@@ -244,6 +244,32 @@ func (s *Store) UpdateThreadMeta(id, title string, updatedAt int64) error {
 	return nil
 }
 
+// TouchThread advances a thread's updated timestamp without changing its title.
+func (s *Store) TouchThread(id string, updatedAt int64) error {
+	_, err := s.db.Exec(`UPDATE threads SET updated_at = ? WHERE id = ?`, updatedAt, id)
+	if err != nil {
+		return fmt.Errorf("db: touch thread: %w", err)
+	}
+	return nil
+}
+
+// SetThreadTitleIfUnchanged replaces a title only while it still equals
+// expected. It reports whether a row changed, so a user rename that lands while
+// a generated title is in flight is never overwritten.
+func (s *Store) SetThreadTitleIfUnchanged(id, expected, title string) (bool, error) {
+	result, err := s.db.Exec(
+		`UPDATE threads SET title = ? WHERE id = ? AND title = ?`,
+		title, id, expected)
+	if err != nil {
+		return false, fmt.Errorf("db: set thread title: %w", err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("db: set thread title: %w", err)
+	}
+	return updated > 0, nil
+}
+
 // SetThreadModel updates the model used by a thread.
 func (s *Store) SetThreadModel(id, model string) error {
 	_, err := s.db.Exec(`UPDATE threads SET model = ? WHERE id = ?`, model, id)
@@ -305,13 +331,38 @@ func (s *Store) AddMessage(m Message) error {
 	return nil
 }
 
+// UpdateMessageContent replaces the text of one message.
+func (s *Store) UpdateMessageContent(id, content string) error {
+	_, err := s.db.Exec(`UPDATE messages SET content = ? WHERE id = ?`, content, id)
+	if err != nil {
+		return fmt.Errorf("db: update message: %w", err)
+	}
+	return nil
+}
+
+// DeleteMessagesAfter removes every message that follows messageID in the same
+// thread. Attachments are removed by the foreign-key cascade.
+func (s *Store) DeleteMessagesAfter(threadID, messageID string) error {
+	_, err := s.db.Exec(`
+		DELETE FROM messages
+		WHERE thread_id = ?
+		  AND rowid > (
+			SELECT rowid FROM messages WHERE id = ? AND thread_id = ?
+		  )`,
+		threadID, messageID, threadID)
+	if err != nil {
+		return fmt.Errorf("db: delete following messages: %w", err)
+	}
+	return nil
+}
+
 // ListMessages returns a thread's messages in chronological order.
 func (s *Store) ListMessages(threadID string) ([]Message, error) {
 	rows, err := s.db.Query(`
 		SELECT id, thread_id, role, content, created_at
 		FROM messages
 		WHERE thread_id = ?
-		ORDER BY created_at`, threadID)
+		ORDER BY created_at, rowid`, threadID)
 	if err != nil {
 		return nil, fmt.Errorf("db: list messages: %w", err)
 	}
@@ -340,7 +391,7 @@ func (s *Store) ListMessages(threadID string) ([]Message, error) {
 		SELECT id, message_id, name, mime_type, size, data, created_at
 		FROM attachments
 		WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?)
-		ORDER BY created_at`, threadID)
+		ORDER BY created_at, rowid`, threadID)
 	if err != nil {
 		return nil, fmt.Errorf("db: list attachments: %w", err)
 	}

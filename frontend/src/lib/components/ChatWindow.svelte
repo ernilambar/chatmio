@@ -2,9 +2,11 @@
   import {
     Check,
     Copy,
+    Loader2,
     MessageSquare,
     Paperclip,
     Pencil,
+    RotateCcw,
     Send,
     Trash2,
     X
@@ -20,6 +22,10 @@
     models,
     defaultModel,
     onsend,
+    onretry,
+    canRetry,
+    onregenerate,
+    onedit,
     onrename,
     ondelete,
     onmodelchange
@@ -32,6 +38,10 @@
     models: string[]
     defaultModel: string
     onsend: (content: string, files: File[]) => void
+    onretry: () => void
+    canRetry: boolean
+    onregenerate: () => void
+    onedit: (messageId: string, content: string) => void
     onrename: (threadId: string, title: string) => Promise<void> | void
     ondelete: (threadId: string) => Promise<void> | void
     onmodelchange: (model: string) => Promise<void> | void
@@ -40,6 +50,7 @@
   let draft = $state('')
   let files = $state<File[]>([])
   let fileInput: HTMLInputElement | undefined = $state()
+  let inputEl: HTMLTextAreaElement | undefined = $state()
   let scroller: HTMLDivElement | undefined = $state()
   let renaming = $state(false)
   let renameInput: HTMLInputElement | undefined = $state()
@@ -47,8 +58,12 @@
   let confirmingDelete = $state(false)
   let copiedId = $state<string | null>(null)
   let copyTimer: ReturnType<typeof setTimeout> | undefined
+  let editing = $state<db.Message | null>(null)
 
   const selectedModel = $derived(thread?.model || defaultModel)
+  const lastMessageId = $derived(
+    messages.length > 0 ? messages[messages.length - 1].id : null
+  )
   const modelOptions = $derived.by(() => {
     const values = new Set(models)
     if (defaultModel) values.add(defaultModel)
@@ -66,11 +81,16 @@
       files = []
       renaming = false
       confirmingDelete = false
+      editing = null
     }
   })
 
   $effect(() => {
     if (renaming && renameInput) renameInput.focus()
+  })
+
+  $effect(() => {
+    if (editing && inputEl) inputEl.focus()
   })
 
   $effect(() => {
@@ -81,7 +101,19 @@
 
   function submit(): void {
     const content = draft.trim()
-    if ((!content && files.length === 0) || streaming) return
+    if (streaming) return
+
+    if (editing) {
+      if (!content) return
+      const message = editing
+      editing = null
+      draft = ''
+      files = []
+      onedit(message.id, content)
+      return
+    }
+
+    if (!content && files.length === 0) return
     const selected = files
     draft = ''
     files = []
@@ -89,10 +121,27 @@
   }
 
   function handleKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape' && editing) {
+      event.preventDefault()
+      cancelEdit()
+      return
+    }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       submit()
     }
+  }
+
+  function startEdit(message: db.Message): void {
+    if (streaming) return
+    editing = message
+    draft = message.content
+    files = []
+  }
+
+  function cancelEdit(): void {
+    editing = null
+    draft = ''
   }
 
   function addFiles(next: Iterable<File>): void {
@@ -292,26 +341,55 @@
                 <div class="whitespace-pre-wrap">{message.content}</div>
               {/if}
             </div>
-            {#if message.content}
-              <button
-                class="ml-1 self-start rounded-md p-1 text-muted opacity-0 transition-opacity hover:text-fg group-hover:opacity-100"
-                title="Copy message"
-                onclick={() => void copyMessage(message)}
-              >
-                {#if copiedId === message.id}
-                  <Check size={13} />
-                {:else}
-                  <Copy size={13} />
-                {/if}
-              </button>
-            {/if}
+            <div
+              class="ml-1 flex shrink-0 items-start gap-0.5 self-start opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+            >
+              {#if message.content}
+                <button
+                  class="rounded-md p-1 text-muted transition-colors hover:text-fg"
+                  title="Copy message"
+                  onclick={() => void copyMessage(message)}
+                >
+                  {#if copiedId === message.id}
+                    <Check size={13} />
+                  {:else}
+                    <Copy size={13} />
+                  {/if}
+                </button>
+              {/if}
+              {#if message.role === 'user' && !streaming}
+                <button
+                  class="rounded-md p-1 text-muted transition-colors hover:text-fg"
+                  title="Edit message"
+                  onclick={() => startEdit(message)}
+                >
+                  <Pencil size={13} />
+                </button>
+              {/if}
+              {#if message.role === 'assistant' && message.id === lastMessageId && !streaming}
+                <button
+                  class="rounded-md p-1 text-muted transition-colors hover:text-fg"
+                  title="Regenerate reply"
+                  onclick={onregenerate}
+                >
+                  <RotateCcw size={13} />
+                </button>
+              {/if}
+            </div>
           </div>
         {/each}
 
         {#if streaming}
           <div class="flex justify-start">
-            <div class="max-w-[80%] whitespace-pre-wrap rounded-lg bg-panel px-3 py-2 text-sm leading-relaxed">
-              {streamText || '…'}
+            <div class="max-w-[80%] rounded-lg bg-panel px-3 py-2 text-sm leading-relaxed">
+              {#if streamText}
+                <div class="whitespace-pre-wrap">{streamText}</div>
+              {:else}
+                <div class="flex items-center gap-2 text-muted">
+                  <Loader2 class="animate-spin" size={14} />
+                  <span>Thinking…</span>
+                </div>
+              {/if}
             </div>
           </div>
         {/if}
@@ -319,13 +397,39 @@
     {/if}
 
     {#if error}
-      <p class="mt-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-500">
-        {error}
-      </p>
+      <div
+        class="mt-3 flex items-start justify-between gap-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-500"
+      >
+        <span class="min-w-0 whitespace-pre-wrap">{error}</span>
+        {#if canRetry}
+          <button
+            type="button"
+            class="shrink-0 rounded border border-red-500/40 px-2 py-0.5 font-medium transition-colors hover:bg-red-500/10"
+            onclick={onretry}
+          >
+            Retry
+          </button>
+        {/if}
+      </div>
     {/if}
   </div>
 
   <div class="border-t border-line p-4">
+    {#if editing}
+      <div
+        class="mb-2 flex items-center justify-between gap-2 rounded-md border border-accent/40 bg-accent/5 px-2 py-1 text-xs text-muted"
+      >
+        <span class="truncate">Editing message</span>
+        <button
+          type="button"
+          class="shrink-0 rounded p-0.5 transition-colors hover:text-fg"
+          title="Cancel edit"
+          onclick={cancelEdit}
+        >
+          <X size={12} />
+        </button>
+      </div>
+    {/if}
     {#if files.length > 0}
       <div class="mb-2 flex flex-wrap gap-2">
         {#each files as file, index (file.name + file.size + index)}
@@ -364,23 +468,24 @@
       <button
         type="button"
         class="rounded-md p-1.5 text-muted transition-colors hover:text-fg disabled:opacity-40"
-        title="Attach files"
-        disabled={streaming}
+        title={editing ? 'Attachments are kept when editing' : 'Attach files'}
+        disabled={streaming || !!editing}
         onclick={() => fileInput?.click()}
       >
         <Paperclip size={16} />
       </button>
       <textarea
+        bind:this={inputEl}
         bind:value={draft}
         onkeydown={handleKeydown}
         rows="1"
-        placeholder="Send a message…"
+        placeholder={editing ? 'Edit message…' : 'Send a message…'}
         class="max-h-40 flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted"
       ></textarea>
       <button
         class="rounded-md bg-accent p-1.5 text-white transition-opacity disabled:opacity-40"
         title="Send"
-        disabled={(!draft.trim() && files.length === 0) || streaming}
+        disabled={streaming || (editing ? !draft.trim() : !draft.trim() && files.length === 0)}
         onclick={submit}
       >
         <Send size={16} />
