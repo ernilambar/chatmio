@@ -339,11 +339,13 @@
     {:else}
       <div class="mx-auto w-full max-w-3xl space-y-5">
         {#each messages as message (message.id)}
-          <div class="group flex {message.role === 'user' ? 'justify-end' : 'justify-start'}">
+          <div
+            class="group flex flex-col {message.role === 'user' ? 'items-end' : 'items-start'}"
+          >
             <div
               class="{message.role === 'user'
                 ? 'max-w-[80%] rounded-2xl rounded-br-md bg-accent px-4 py-2.5 text-sm leading-relaxed text-white'
-                : 'min-w-0 flex-1 py-0.5 text-sm leading-relaxed'}"
+                : 'w-full min-w-0 py-0.5 text-sm leading-relaxed'}"
             >
               {#if message.attachments?.length}
                 <div class="mb-2 flex flex-wrap gap-2">
@@ -367,16 +369,15 @@
               {#if message.content}
                 <Markdown content={message.content} />
               {/if}
-            </div>
-            <div
-              class="flex shrink-0 items-start gap-0.5 self-start opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 {message.role ===
-              'user'
-                ? 'order-first mr-1'
-                : 'ml-1'}"
-            >
+              <div
+                class="mt-1 flex items-center gap-0.5 opacity-60 transition-opacity group-hover:opacity-100 focus-within:opacity-100 {message.role ===
+                'user'
+                  ? 'justify-end'
+                  : ''}"
+              >
               {#if message.content}
                 <button
-                  class="rounded-md p-1 text-muted transition-colors hover:text-fg"
+                  class="rounded-md p-1 transition-colors {message.role === 'user' ? 'text-white/70 hover:text-white' : 'text-muted hover:text-fg'}"
                   title="Copy message"
                   onclick={() => void copyMessage(message)}
                 >
@@ -389,7 +390,7 @@
               {/if}
               {#if message.role === 'user' && !streaming}
                 <button
-                  class="rounded-md p-1 text-muted transition-colors hover:text-fg"
+                  class="rounded-md p-1 text-white transition-colors hover:text-white"
                   title="Edit message"
                   onclick={() => startEdit(message)}
                 >
@@ -405,6 +406,7 @@
                   <RotateCcw size={13} />
                 </button>
               {/if}
+              </div>
             </div>
           </div>
         {/each}
