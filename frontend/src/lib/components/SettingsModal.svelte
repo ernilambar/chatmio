@@ -347,7 +347,6 @@
                     bind:value={chatModel}
                     class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
                     placeholder="gpt-4o-mini"
-                    required
                   />
                 {/if}
               </label>
