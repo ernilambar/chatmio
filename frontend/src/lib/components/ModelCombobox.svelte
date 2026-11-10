@@ -20,8 +20,16 @@
   let root: HTMLDivElement | undefined = $state()
   let searchInput: HTMLInputElement | undefined = $state()
 
+  // Model ids separate words with "/", "-", "." and ":", so match each search
+  // word independently: "deepseek 4.1" must find "deepseek/deepseek-v4.1-flash".
+  const terms = $derived(query.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean))
   const filtered = $derived(
-    options.filter((model) => model.toLowerCase().includes(query.trim().toLowerCase()))
+    terms.length === 0
+      ? options
+      : options.filter((model) => {
+          const id = model.toLowerCase()
+          return terms.every((term) => id.includes(term))
+        })
   )
 
   $effect(() => {
