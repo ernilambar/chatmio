@@ -21,10 +21,10 @@
   type Section = 'appearance' | 'chat' | 'provider' | 'web'
 
   const sections: { id: Section; label: string }[] = [
-    { id: 'appearance', label: 'Appearance' },
-    { id: 'chat', label: 'Chat defaults' },
     { id: 'provider', label: 'Provider' },
-    { id: 'web', label: 'Web tools' }
+    { id: 'chat', label: 'Chat defaults' },
+    { id: 'web', label: 'Web tools' },
+    { id: 'appearance', label: 'Appearance' }
   ]
 
   const themeOptions: { id: ThemeMode; label: string; icon: typeof Monitor }[] = [
@@ -33,7 +33,7 @@
     { id: 'dark', label: 'Dark', icon: Moon }
   ]
 
-  let section = $state<Section>('appearance')
+  let section = $state<Section>('provider')
   let baseUrl = $state('')
   let apiKey = $state('')
   let chatModel = $state('')
@@ -77,7 +77,7 @@
       const savedTheme = cfg.theme === 'light' || cfg.theme === 'dark' ? cfg.theme : 'system'
       themeMode = savedTheme
       initialTheme = savedTheme
-      section = 'appearance'
+      section = 'provider'
       error = null
       untrack(() => void loadModels())
     }
