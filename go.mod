@@ -1,4 +1,4 @@
-module github.com/ernilambar/chattu
+module github.com/ernilambar/chatmio
 
 go 1.26.0
 

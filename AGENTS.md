@@ -2,7 +2,7 @@
 
 ## Overview
 
-Chattu is a macOS desktop client for OpenAI-compatible chat APIs. The backend is Go
+Chatmio is a macOS desktop client for OpenAI-compatible chat APIs. The backend is Go
 (Wails v2) and the frontend is Svelte 5 + TypeScript + Vite + Tailwind CSS 4.
 
 Optional web tools: `pkg/webtools` exposes `web_search` / `web_fetch` backed by the Ollama web API

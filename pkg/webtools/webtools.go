@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ernilambar/chattu/pkg/ai"
+	"github.com/ernilambar/chatmio/pkg/ai"
 )
 
 const (

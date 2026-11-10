@@ -1,4 +1,4 @@
-# chattu
+# chatmio
 
 Fast macOS desktop client for any OpenAI-compatible API.
 
@@ -20,13 +20,13 @@ Fast macOS desktop client for any OpenAI-compatible API.
 
 ## Install
 
-Download `Chattu-macos-arm64.zip` from the latest release, then:
+Download `Chatmio-macos-arm64.zip` from the latest release, then:
 
 ```sh
-unzip Chattu-macos-arm64.zip
-xattr -dr com.apple.quarantine Chattu.app
-mv Chattu.app /Applications/
-open /Applications/Chattu.app
+unzip Chatmio-macos-arm64.zip
+xattr -dr com.apple.quarantine Chatmio.app
+mv Chatmio.app /Applications/
+open /Applications/Chatmio.app
 ```
 
 The app is ad-hoc signed, so removing the quarantine attribute is required after downloading.

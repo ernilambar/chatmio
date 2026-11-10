@@ -100,8 +100,8 @@ scripts/bundle.sh
 This runs the quality gate, regenerates and checks the Wails bindings, builds the arm64 bundle, and
 produces:
 
-- `dist/Chattu.app`
-- `dist/Chattu-macos-arm64.zip`
+- `dist/Chatmio.app`
+- `dist/Chatmio-macos-arm64.zip`
 - `dist/SHA256SUMS`
 
 ## Release

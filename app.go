@@ -18,10 +18,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"github.com/ernilambar/chattu/pkg/ai"
-	"github.com/ernilambar/chattu/pkg/config"
-	"github.com/ernilambar/chattu/pkg/db"
-	"github.com/ernilambar/chattu/pkg/webtools"
+	"github.com/ernilambar/chatmio/pkg/ai"
+	"github.com/ernilambar/chatmio/pkg/config"
+	"github.com/ernilambar/chatmio/pkg/db"
+	"github.com/ernilambar/chatmio/pkg/webtools"
 )
 
 const (
