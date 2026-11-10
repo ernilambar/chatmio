@@ -20,16 +20,17 @@ Fast macOS desktop client for any OpenAI-compatible API.
 
 ## Install
 
-Download `Chatmio-macos-arm64.zip` from the latest release, then:
+Install with [Homebrew](https://brew.sh):
 
 ```sh
-unzip Chatmio-macos-arm64.zip
-xattr -dr com.apple.quarantine Chatmio.app
-mv Chatmio.app /Applications/
-open /Applications/Chatmio.app
+brew tap ernilambar/tap
+brew trust ernilambar/tap
+brew install --cask ernilambar/tap/chatmio
 ```
 
-The app is ad-hoc signed, so removing the quarantine attribute is required after downloading.
+The app is ad-hoc signed, not notarized; the cask clears the quarantine flag. Upgrade with
+`brew upgrade --cask chatmio`; remove settings and chat history too with
+`brew uninstall --zap --cask chatmio`.
 
 ## Configuration
 

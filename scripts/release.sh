@@ -48,3 +48,4 @@ fi
 git tag -a "$tag" -m "$tag"
 git push origin "$tag"
 echo "pushed $tag; GitHub Actions will publish the release"
+echo "after it publishes: cd ~/Code/personal/homebrew-tap && bin/release-cask chatmio ${tag#v}"

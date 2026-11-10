@@ -106,12 +106,47 @@ produces:
 
 ## Release
 
-Bump `info.productVersion` in `wails.json`, commit it, then:
+Maintainers only. Users install through the Homebrew cask in
+[ernilambar/homebrew-tap](https://github.com/ernilambar/homebrew-tap), so a release is not done until
+the cask points at it.
 
-```sh
-scripts/release.sh v0.1.0
-```
+1. Bump `info.productVersion` in `wails.json` and commit it.
+2. Tag and push:
 
-The tag must match `wails.json`; the script builds locally, verifies the tree is still clean,
-creates the tag, and pushes it. GitHub Actions then builds on an arm64 runner and publishes the zip
-and checksum as a GitHub release.
+   ```sh
+   scripts/release.sh v0.2.0
+   ```
+
+   The tag must match `wails.json`; the script builds locally, verifies the tree is still clean,
+   creates the tag, and pushes it. GitHub Actions then builds on an arm64 runner and publishes
+   `Chatmio-macos-arm64.zip` and `SHA256SUMS` as a GitHub release.
+3. Wait for the release workflow to finish:
+
+   ```sh
+   gh run watch "$(gh run list --workflow release.yml -L 1 --json databaseId -q '.[0].databaseId')"
+   ```
+
+4. Bump the cask from the tap checkout (version without the `v`):
+
+   ```sh
+   cd ~/Code/personal/homebrew-tap
+   git pull
+   bin/release-cask chatmio 0.2.0
+   ```
+
+   The script downloads the published zip, hashes it, and rewrites `version` and `sha256` in
+   `Casks/chatmio.rb`.
+5. Commit and push the tap:
+
+   ```sh
+   git commit -am "chatmio 0.2.0"
+   git push
+   ```
+
+6. Verify against the installed tap:
+
+   ```sh
+   brew update
+   brew audit --cask --online ernilambar/tap/chatmio
+   brew upgrade --cask chatmio
+   ```
