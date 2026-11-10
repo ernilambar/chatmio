@@ -156,7 +156,7 @@ func Open(path string) (*Store, error) {
 // OpenMemory opens a private in-memory store. Nothing written to it survives
 // the process, so temporary chats never touch disk.
 func OpenMemory() (*Store, error) {
-	return open("file:chattu-temp-" + uuid.NewString() +
+	return open("file:temp-" + uuid.NewString() +
 		"?mode=memory&cache=shared" +
 		"&_pragma=foreign_keys(1)" +
 		"&_pragma=busy_timeout(5000)")

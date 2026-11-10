@@ -10,7 +10,7 @@
   import { chat } from './lib/stores/chat.svelte'
   import { disableTextAssist } from './lib/disable-autosuggest'
 
-  const SIDEBAR_KEY = 'chattu.sidebar.visible'
+  const SIDEBAR_KEY = 'sidebar.visible'
 
   function readSidebarVisible(): boolean {
     try {

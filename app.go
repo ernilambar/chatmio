@@ -72,7 +72,7 @@ func NewApp() *App {
 		log.Printf("app: resolve config dir: %v", err)
 		baseDir = "."
 	}
-	dataDir := filepath.Join(baseDir, "chattu")
+	dataDir := filepath.Join(baseDir, readAppDetails().Slug)
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		log.Printf("app: create data dir: %v", err)
 	}

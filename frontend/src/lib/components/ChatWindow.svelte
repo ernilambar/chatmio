@@ -365,7 +365,7 @@
         />
       {:else}
         <div class="flex items-center gap-1.5">
-          <h1 class="truncate text-sm font-medium">{thread?.title ?? 'Chattu'}</h1>
+          <h1 class="truncate text-sm font-medium">{thread?.title ?? import.meta.env.VITE_APP_NAME}</h1>
         </div>
       {/if}
 

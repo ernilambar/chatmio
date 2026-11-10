@@ -30,6 +30,7 @@ type AboutInfo struct {
 }
 
 type appDetails struct {
+	Slug        string // wails.json name: data directory and bundle IDs
 	Name        string
 	Version     string
 	Description string
@@ -38,6 +39,7 @@ type appDetails struct {
 
 func readAppDetails() appDetails {
 	var cfg struct {
+		Name string `json:"name"`
 		Info struct {
 			ProductName    string `json:"productName"`
 			ProductVersion string `json:"productVersion"`
@@ -48,13 +50,14 @@ func readAppDetails() appDetails {
 	_ = json.Unmarshal(wailsConfig, &cfg)
 
 	details := appDetails{
+		Slug:        strings.TrimSpace(cfg.Name),
 		Name:        strings.TrimSpace(cfg.Info.ProductName),
 		Version:     strings.TrimSpace(cfg.Info.ProductVersion),
 		Description: strings.TrimSpace(cfg.Info.Comments),
 		Copyright:   strings.TrimSpace(cfg.Info.Copyright),
 	}
 	if details.Name == "" {
-		details.Name = "Chattu"
+		details.Name = details.Slug
 	}
 	if details.Version == "" {
 		details.Version = "dev"

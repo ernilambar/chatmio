@@ -27,7 +27,7 @@
 
 <aside class="flex w-64 shrink-0 flex-col border-r border-line bg-panel">
   <div class="flex items-center justify-between px-3 py-3">
-    <span class="px-1 text-sm font-semibold tracking-wide">Chattu</span>
+    <span class="px-1 text-sm font-semibold tracking-wide">{import.meta.env.VITE_APP_NAME}</span>
     <div class="flex items-center gap-0.5">
       <button
         class="rounded-md p-1.5 text-muted transition-colors hover:bg-surface hover:text-fg"
