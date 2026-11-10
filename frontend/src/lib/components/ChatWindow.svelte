@@ -464,11 +464,15 @@
     {#if messages.length === 0 && !streaming}
       <div class="flex h-full flex-col items-center justify-center gap-2 text-muted">
         <MessageSquare size={28} />
-        <p class="text-sm">
-          {temporary
-            ? 'Temporary chat. Messages are not saved.'
-            : 'Send a message to start the conversation.'}
-        </p>
+        {#if !thread}
+          <p class="text-sm">
+            {defaultModel ? 'Start a new chat.' : 'Set a chat model in settings to start a chat.'}
+          </p>
+        {:else}
+          <p class="text-sm">
+            {temporary ? 'Temporary chat. Messages are not saved.' : 'Send a message to start the conversation.'}
+          </p>
+        {/if}
       </div>
     {:else}
       <div class="mx-auto w-full max-w-3xl space-y-5">
@@ -697,7 +701,7 @@
         type="button"
         class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:text-fg disabled:opacity-40"
         title={editing ? 'Attachments are kept when editing' : 'Attach files'}
-        disabled={streaming || !!editing}
+        disabled={!thread || streaming || !!editing}
         onclick={() => fileInput?.click()}
       >
         <Paperclip size={16} />
@@ -721,6 +725,7 @@
         bind:value={draft}
         onkeydown={handleKeydown}
         rows="1"
+        disabled={!thread}
         placeholder={editing ? 'Edit message…' : 'Send a message…'}
         class="max-h-40 flex-1 resize-none bg-transparent py-1.5 text-sm leading-5 outline-none placeholder:text-muted"
       ></textarea>
@@ -737,7 +742,7 @@
         <button
           class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-accent text-white transition-opacity disabled:opacity-40"
           title="Send"
-          disabled={editing ? !draft.trim() : !draft.trim() && files.length === 0}
+          disabled={!thread || (editing ? !draft.trim() : !draft.trim() && files.length === 0)}
           onclick={submit}
         >
           <Send size={16} />

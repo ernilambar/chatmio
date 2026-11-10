@@ -152,7 +152,7 @@ class ChatStore {
     const first = this.threads[0]
     if (first && (await GetMessages(first.id)).length === 0) {
       await this.select(first.id)
-    } else {
+    } else if (this.chatModelReady) {
       await this.createThread()
     }
     void this.loadModels()
@@ -225,8 +225,12 @@ class ChatStore {
     }
   }
 
+  get chatModelReady(): boolean {
+    return !!this.config?.chatModel.trim()
+  }
+
   async createThread(): Promise<void> {
-    if (this.streaming) return
+    if (this.streaming || !this.chatModelReady) return
     await this.dropTemporary()
     const thread = await CreateThread()
     this.threads = [thread, ...this.threads]
@@ -239,7 +243,7 @@ class ChatStore {
   // createTemporaryThread starts a chat whose messages are never written to
   // disk. Switching away from it discards it.
   async createTemporaryThread(): Promise<void> {
-    if (this.streaming) return
+    if (this.streaming || !this.chatModelReady) return
     await this.dropTemporary()
     const thread = await CreateTemporaryThread()
     this.tempThread = thread

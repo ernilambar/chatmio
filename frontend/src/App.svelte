@@ -71,12 +71,12 @@
     }
     if (mod && event.shiftKey && key === 'n') {
       event.preventDefault()
-      void chat.createTemporaryThread()
+      if (chat.chatModelReady) void chat.createTemporaryThread()
       return
     }
     if (mod && key === 'n') {
       event.preventDefault()
-      void chat.createThread()
+      if (chat.chatModelReady) void chat.createThread()
       return
     }
     if (mod && event.key === ',') {
@@ -116,6 +116,7 @@
       threads={chat.threads}
       activeId={chat.activeId}
       temporaryActive={chat.temporary}
+      canCreate={chat.chatModelReady}
       oncreate={() => chat.createThread()}
       oncreatetemporary={() => chat.createTemporaryThread()}
       onselect={(id) => chat.select(id)}

@@ -6,6 +6,7 @@
     threads,
     activeId,
     temporaryActive,
+    canCreate,
     oncreate,
     oncreatetemporary,
     onselect,
@@ -16,6 +17,7 @@
     threads: db.Thread[]
     activeId: string | null
     temporaryActive: boolean
+    canCreate: boolean
     oncreate: () => void
     oncreatetemporary: () => void
     onselect: (id: string) => void
@@ -44,18 +46,20 @@
         <Search size={16} />
       </button>
       <button
-        class="rounded-md p-1.5 transition-colors {temporaryActive
+        class="rounded-md p-1.5 transition-colors disabled:opacity-40 disabled:pointer-events-none {temporaryActive
           ? 'bg-surface text-fg'
           : 'text-muted hover:bg-surface hover:text-fg'}"
-        title="Temporary chat (⌘⇧N, not saved)"
+        title={canCreate ? 'Temporary chat (⌘⇧N, not saved)' : 'Set a chat model in settings'}
         aria-pressed={temporaryActive}
+        disabled={!canCreate}
         onclick={oncreatetemporary}
       >
         <Ghost size={16} />
       </button>
       <button
-        class="rounded-md p-1.5 text-muted transition-colors hover:bg-surface hover:text-fg"
-        title="New chat (⌘N)"
+        class="rounded-md p-1.5 text-muted transition-colors hover:bg-surface hover:text-fg disabled:opacity-40 disabled:pointer-events-none"
+        title={canCreate ? 'New chat (⌘N)' : 'Set a chat model in settings'}
+        disabled={!canCreate}
         onclick={oncreate}
       >
         <Plus size={16} />
