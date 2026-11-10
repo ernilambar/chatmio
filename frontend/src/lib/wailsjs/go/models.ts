@@ -12,6 +12,7 @@ export namespace config {
 	    maxTokens?: number;
 	    frequencyPenalty?: number;
 	    ollamaApiKey: string;
+	    theme: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -30,6 +31,7 @@ export namespace config {
 	        this.maxTokens = source["maxTokens"];
 	        this.frequencyPenalty = source["frequencyPenalty"];
 	        this.ollamaApiKey = source["ollamaApiKey"];
+	        this.theme = source["theme"];
 	    }
 	}
 

@@ -23,17 +23,15 @@
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --surface: #0f1115;
-    --panel: #171a21;
-    --line: #262a33;
-    --fg: #e7e9ee;
-    --muted: #8b93a7;
-    --accent: #3b82f6;
-    --bubble: #1d212a;
-    color-scheme: dark;
-  }
+:root[data-theme='dark'] {
+  --surface: #0f1115;
+  --panel: #171a21;
+  --line: #262a33;
+  --fg: #e7e9ee;
+  --muted: #8b93a7;
+  --accent: #3b82f6;
+  --bubble: #1d212a;
+  color-scheme: dark;
 }
 
 html,
@@ -230,16 +228,14 @@ body {
   --code-meta: #116329;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --code-comment: #8b949e;
-    --code-keyword: #ff7b72;
-    --code-string: #a5d6ff;
-    --code-number: #79c0ff;
-    --code-title: #d2a8ff;
-    --code-builtin: #ffa657;
-    --code-meta: #7ee787;
-  }
+:root[data-theme='dark'] {
+  --code-comment: #8b949e;
+  --code-keyword: #ff7b72;
+  --code-string: #a5d6ff;
+  --code-number: #79c0ff;
+  --code-title: #d2a8ff;
+  --code-builtin: #ffa657;
+  --code-meta: #7ee787;
 }
 
 .markdown .hljs-comment,

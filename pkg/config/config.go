@@ -29,12 +29,16 @@ type Config struct {
 	FrequencyPenalty *float64 `json:"frequencyPenalty,omitempty"`
 	// OllamaAPIKey enables the web search and fetch tools. Empty disables them.
 	OllamaAPIKey string `json:"ollamaApiKey"`
+	// Theme is the UI color theme: "system", "light", or "dark". Empty is
+	// normalized to "system".
+	Theme string `json:"theme"`
 }
 
 // Default returns the configuration used on first launch.
 func Default() Config {
 	return Config{
 		BaseURL: "https://api.openai.com/v1",
+		Theme:   "system",
 	}
 }
 
@@ -80,6 +84,13 @@ func (m *Manager) Save(cfg Config) error {
 	cfg.ChatModel = strings.TrimSpace(cfg.ChatModel)
 	cfg.TitleModel = strings.TrimSpace(cfg.TitleModel)
 	cfg.OllamaAPIKey = strings.TrimSpace(cfg.OllamaAPIKey)
+	switch cfg.Theme {
+	case "", "system":
+		cfg.Theme = "system"
+	case "light", "dark":
+	default:
+		return fmt.Errorf("config: invalid theme %q", cfg.Theme)
+	}
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {

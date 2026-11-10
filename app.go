@@ -138,6 +138,11 @@ func (a *App) SaveConfig(cfg config.Config) error {
 	if cfg.ContextWindow < 0 {
 		return errors.New("context window must be zero or more")
 	}
+	switch cfg.Theme {
+	case "", "system", "light", "dark":
+	default:
+		return errors.New("theme must be system, light, or dark")
+	}
 	if err := validateThreadSettings(db.ThreadSettings{
 		Temperature:      cfg.Temperature,
 		TopP:             cfg.TopP,

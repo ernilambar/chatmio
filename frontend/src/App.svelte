@@ -8,6 +8,7 @@
   import ChatSettingsModal from './lib/components/ChatSettingsModal.svelte'
   import { EventsOn } from './lib/wailsjs/runtime/runtime'
   import { chat } from './lib/stores/chat.svelte'
+  import { theme } from './lib/stores/theme.svelte'
   import { disableTextAssist } from './lib/disable-autosuggest'
 
   const SIDEBAR_KEY = 'sidebar.visible'
@@ -28,6 +29,12 @@
   let sidebarOpen = $state(readSidebarVisible())
 
   const activeThread = $derived(chat.activeThread)
+
+  $effect(() => {
+    const value = chat.config?.theme
+    if (!chat.config) return
+    theme.mode = value === 'light' || value === 'dark' ? value : 'system'
+  })
 
   function toggleSidebar(): void {
     sidebarOpen = !sidebarOpen

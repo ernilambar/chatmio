@@ -4,9 +4,19 @@
     <meta charset="UTF-8"/>
     <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>%VITE_APP_NAME%</title>
+    <script>
+        (function () {
+            var mode = 'system';
+            try { mode = localStorage.getItem('theme') || 'system'; } catch (error) {}
+            if (mode !== 'light' && mode !== 'dark') {
+                mode = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            }
+            document.documentElement.dataset.theme = mode;
+        })();
+    </script>
     <style>
-        html { background: #0f1115; }
-        @media (prefers-color-scheme: light) { html { background: #ffffff; } }
+        html { background: #ffffff; }
+        html[data-theme='dark'] { background: #0f1115; }
     </style>
 </head>
 <body>
