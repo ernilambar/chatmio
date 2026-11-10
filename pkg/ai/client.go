@@ -146,6 +146,27 @@ func (c *Client) setHeaders(req *http.Request) {
 	}
 }
 
+// apiError describes a failed response. Providers usually wrap the reason in
+// {"error":{"message":"…"}}, so prefer that over the raw JSON body.
+func apiError(resp *http.Response) error {
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	message := strings.TrimSpace(string(body))
+	var payload struct {
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &payload) == nil && payload.Error != nil {
+		if msg := strings.TrimSpace(payload.Error.Message); msg != "" {
+			message = msg
+		}
+	}
+	if message == "" {
+		return fmt.Errorf("ai: %s", resp.Status)
+	}
+	return fmt.Errorf("ai: %s: %s", resp.Status, message)
+}
+
 // ListModels returns the model identifiers exposed by GET /models.
 func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 	if c.BaseURL == "" {
@@ -166,8 +187,7 @@ func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("ai: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		return nil, apiError(resp)
 	}
 
 	var payload struct {
@@ -289,8 +309,7 @@ func (c *Client) StreamChat(ctx context.Context, opts ChatOptions, onDelta func(
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return reply, fmt.Errorf("ai: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		return reply, apiError(resp)
 	}
 
 	scanner := bufio.NewScanner(resp.Body)

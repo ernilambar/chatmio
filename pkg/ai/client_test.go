@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -94,5 +96,21 @@ func TestStreamChatCollectsToolCalls(t *testing.T) {
 	}
 	if tools, _ := request["tools"].([]any); len(tools) != 1 {
 		t.Fatalf("tools = %v, want one tool", request["tools"])
+	}
+}
+
+func TestAPIErrorPrefersProviderMessage(t *testing.T) {
+	body := `{"error":{"message":"Missing bearer authentication in header","type":"invalid_request_error"}}`
+	resp := &http.Response{
+		Status: "401 Unauthorized",
+		Body:   io.NopCloser(strings.NewReader(body)),
+	}
+	if got, want := apiError(resp).Error(), "ai: 401 Unauthorized: Missing bearer authentication in header"; got != want {
+		t.Fatalf("apiError = %q, want %q", got, want)
+	}
+
+	resp = &http.Response{Status: "502 Bad Gateway", Body: io.NopCloser(strings.NewReader("upstream down"))}
+	if got, want := apiError(resp).Error(), "ai: 502 Bad Gateway: upstream down"; got != want {
+		t.Fatalf("apiError = %q, want %q", got, want)
 	}
 }
