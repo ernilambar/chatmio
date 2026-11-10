@@ -146,7 +146,14 @@ class ChatStore {
   async init(): Promise<void> {
     this.config = await GetConfig()
     this.listen()
-    this.threads = await ListThreads()
+    try {
+      this.threads = await ListThreads()
+    } catch (err) {
+      // The chat database is unavailable; temporary chats still work.
+      this.error = err instanceof Error ? err.message : String(err)
+      void this.loadModels()
+      return
+    }
     // Open on a fresh chat; reuse the latest thread if it is still empty so
     // launches don't accumulate blank threads.
     const first = this.threads[0]

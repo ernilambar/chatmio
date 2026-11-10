@@ -30,6 +30,7 @@ const (
 	titleTemperature       = 0.2
 	titleMaxTokens         = 512
 	titleTimeout           = 30 * time.Second
+	listModelsTimeout      = 15 * time.Second
 	titlePrompt            = "Generate a short title for this conversation. Reply with only the title: 3 to 6 words, no quotes, no trailing punctuation."
 	maxAttachments         = 10
 	maxAttachmentBytes     = 10 << 20
@@ -43,10 +44,13 @@ const (
 
 // App is the backend bridge exposed to the frontend.
 type App struct {
+	// ctx is cancelled at shutdown so in-flight requests stop promptly.
 	ctx       context.Context
+	stop      context.CancelFunc
 	dataDir   string
 	config    *config.Manager
 	store     *db.Store
+	storeErr  error
 	tempStore *db.Store
 	sendMu    sync.Mutex
 
@@ -87,25 +91,28 @@ func NewApp() *App {
 
 // startup is called by Wails once the window is ready.
 func (a *App) startup(ctx context.Context) {
-	a.ctx = ctx
+	a.ctx, a.stop = context.WithCancel(ctx)
 
 	if _, err := a.config.Load(); err != nil {
 		log.Printf("app: load config: %v", err)
 	}
 
+	// Open both stores independently so temporary chats still work when the
+	// disk database cannot be opened.
 	store, err := db.Open(filepath.Join(a.dataDir, "chats.db"))
 	if err != nil {
 		log.Printf("app: open database: %v", err)
-		return
+		a.storeErr = err
+	} else {
+		a.store = store
 	}
-	a.store = store
 
 	tempStore, err := db.OpenMemory()
 	if err != nil {
 		log.Printf("app: open temporary database: %v", err)
-		return
+	} else {
+		a.tempStore = tempStore
 	}
-	a.tempStore = tempStore
 }
 
 // shutdown is called by Wails before the application exits.
@@ -113,6 +120,13 @@ func (a *App) shutdown(context.Context) {
 	a.titleMu.Lock()
 	a.closed = true
 	a.titleMu.Unlock()
+	// Stop streaming replies and title requests, then wait for them to
+	// return before closing the stores they write to.
+	if a.stop != nil {
+		a.stop()
+	}
+	a.sendMu.Lock()
+	defer a.sendMu.Unlock()
 	a.titleWg.Wait()
 	if err := a.store.Close(); err != nil {
 		log.Printf("app: close database: %v", err)
@@ -161,10 +175,19 @@ func (a *App) threadStore(threadID string) (*db.Store, error) {
 		}
 		return tempStore, nil
 	}
-	if a.store == nil {
-		return nil, errors.New("database unavailable")
+	return a.diskStore()
+}
+
+// diskStore returns the on-disk store, or an error that explains why it could
+// not be opened.
+func (a *App) diskStore() (*db.Store, error) {
+	if a.store != nil {
+		return a.store, nil
 	}
-	return a.store, nil
+	if a.storeErr != nil {
+		return nil, fmt.Errorf("database unavailable: %w", a.storeErr)
+	}
+	return nil, errors.New("database unavailable")
 }
 
 func (a *App) isTemporaryThread(threadID string) bool {
@@ -175,25 +198,28 @@ func (a *App) isTemporaryThread(threadID string) bool {
 
 // ListThreads returns all chat threads, most recently updated first.
 func (a *App) ListThreads() ([]db.Thread, error) {
-	if a.store == nil {
-		return nil, errors.New("database unavailable")
+	store, err := a.diskStore()
+	if err != nil {
+		return nil, err
 	}
-	return a.store.ListThreads()
+	return store.ListThreads()
 }
 
 // SearchThreads finds threads by title or message content, most recently
 // updated first.
 func (a *App) SearchThreads(query string) ([]db.SearchResult, error) {
-	if a.store == nil {
-		return nil, errors.New("database unavailable")
+	store, err := a.diskStore()
+	if err != nil {
+		return nil, err
 	}
-	return a.store.SearchThreads(query, 20)
+	return store.SearchThreads(query, 20)
 }
 
 // CreateThread creates an empty chat thread and returns it.
 func (a *App) CreateThread() (db.Thread, error) {
-	if a.store == nil {
-		return db.Thread{}, errors.New("database unavailable")
+	store, err := a.diskStore()
+	if err != nil {
+		return db.Thread{}, err
 	}
 	cfg, err := a.config.Load()
 	if err != nil {
@@ -213,7 +239,7 @@ func (a *App) CreateThread() (db.Thread, error) {
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
-	if err := a.store.CreateThread(thread); err != nil {
+	if err := store.CreateThread(thread); err != nil {
 		return db.Thread{}, err
 	}
 	return thread, nil
@@ -371,6 +397,8 @@ func (a *App) ListModels(baseURL, apiKey string) ([]string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	ctx, cancel := context.WithTimeout(ctx, listModelsTimeout)
+	defer cancel()
 	return ai.New(baseURL, apiKey, nil).ListModels(ctx)
 }
 
