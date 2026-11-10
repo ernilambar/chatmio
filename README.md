@@ -1,4 +1,4 @@
-# chatmio
+# Chatmio
 
 Fast macOS desktop client for any OpenAI-compatible API.
 
