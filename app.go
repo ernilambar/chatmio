@@ -129,12 +129,6 @@ func (a *App) GetConfig() (config.Config, error) {
 
 // SaveConfig persists the configuration.
 func (a *App) SaveConfig(cfg config.Config) error {
-	if strings.TrimSpace(cfg.BaseURL) == "" {
-		return errors.New("base URL is required")
-	}
-	if strings.TrimSpace(cfg.ChatModel) == "" {
-		return errors.New("chat model is required")
-	}
 	if cfg.ContextWindow < 0 {
 		return errors.New("context window must be zero or more")
 	}

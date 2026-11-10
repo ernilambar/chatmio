@@ -74,8 +74,9 @@
       maxTokens = cfg.maxTokens ?? null
       frequencyPenalty = cfg.frequencyPenalty ?? null
       ollamaApiKey = cfg.ollamaApiKey
-      themeMode = cfg.theme === 'light' || cfg.theme === 'dark' ? cfg.theme : 'system'
-      initialTheme = themeMode
+      const savedTheme = cfg.theme === 'light' || cfg.theme === 'dark' ? cfg.theme : 'system'
+      themeMode = savedTheme
+      initialTheme = savedTheme
       section = 'appearance'
       error = null
       untrack(() => void loadModels())
@@ -118,10 +119,6 @@
 
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault()
-    if (!chatModel.trim()) {
-      error = 'Chat model is required.'
-      return
-    }
     saving = true
     error = null
     try {
