@@ -44,7 +44,9 @@
   let topP = $state<number | null>(null)
   let maxTokens = $state<number | null>(null)
   let frequencyPenalty = $state<number | null>(null)
+  let braveApiKey = $state('')
   let ollamaApiKey = $state('')
+  let searchMode = $state<'brave' | 'ollama' | 'disabled'>('brave')
   let themeMode = $state<ThemeMode>('system')
   let initialTheme = $state<ThemeMode>('system')
   let models = $state<string[]>([])
@@ -73,7 +75,13 @@
       topP = cfg.topP ?? null
       maxTokens = cfg.maxTokens ?? null
       frequencyPenalty = cfg.frequencyPenalty ?? null
+      braveApiKey = cfg.braveApiKey
       ollamaApiKey = cfg.ollamaApiKey
+      searchMode = !cfg.webToolsEnabled
+        ? 'disabled'
+        : cfg.searchProvider === 'ollama'
+          ? 'ollama'
+          : 'brave'
       const savedTheme = cfg.theme === 'light' || cfg.theme === 'dark' ? cfg.theme : 'system'
       themeMode = savedTheme
       initialTheme = savedTheme
@@ -134,7 +142,10 @@
           topP: topP ?? undefined,
           maxTokens: maxTokens ?? undefined,
           frequencyPenalty: frequencyPenalty ?? undefined,
+          braveApiKey,
           ollamaApiKey,
+          searchProvider: searchMode === 'ollama' ? 'ollama' : 'brave',
+          webToolsEnabled: searchMode !== 'disabled',
           theme: themeMode
         })
       )
@@ -384,18 +395,54 @@
           {:else}
             <div class="space-y-3">
               <label class="block space-y-1">
-                <span class="text-xs text-muted">Ollama API key (web search)</span>
-                <input
-                  bind:value={ollamaApiKey}
-                  type="password"
+                <span class="text-xs text-muted">Search provider</span>
+                <select
+                  bind:value={searchMode}
                   class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
-                  placeholder="Optional"
-                />
+                >
+                  <option value="disabled">Disabled</option>
+                  <option value="brave">Brave Search</option>
+                  <option value="ollama">Ollama</option>
+                </select>
                 <span class="text-[11px] text-muted">
-                  Enables the web search toggle in chats. Queries and fetched URLs are sent to
-                  ollama.com. The chat model must support tool calling.
+                  Choose a provider and enter its API key, or disable web search everywhere.
                 </span>
               </label>
+
+              {#if searchMode === 'brave'}
+                <label class="block space-y-1">
+                  <span class="text-xs text-muted">Brave Search API key</span>
+                  <input
+                    bind:value={braveApiKey}
+                    type="password"
+                    class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+                    placeholder="Required"
+                  />
+                  <span class="text-[11px] text-muted">
+                    Enables the web search toggle in chats. Queries are sent to
+                    api.search.brave.com. The chat model must support tool calling.
+                  </span>
+                </label>
+              {:else if searchMode === 'ollama'}
+                <label class="block space-y-1">
+                  <span class="text-xs text-muted">Ollama API key</span>
+                  <input
+                    bind:value={ollamaApiKey}
+                    type="password"
+                    class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+                    placeholder="Required"
+                  />
+                  <span class="text-[11px] text-muted">
+                    Enables the web search toggle in chats. Queries and fetched URLs are sent
+                    to ollama.com. The chat model must support tool calling.
+                  </span>
+                </label>
+              {:else}
+                <p class="text-[11px] text-muted">
+                  Web search and page fetch are off for every chat. Your provider and key are
+                  kept for when you turn them back on.
+                </p>
+              {/if}
             </div>
           {/if}
         </div>

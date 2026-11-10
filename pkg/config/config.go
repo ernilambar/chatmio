@@ -27,7 +27,14 @@ type Config struct {
 	TopP             *float64 `json:"topP,omitempty"`
 	MaxTokens        *int     `json:"maxTokens,omitempty"`
 	FrequencyPenalty *float64 `json:"frequencyPenalty,omitempty"`
-	// OllamaAPIKey enables the web search and fetch tools. Empty disables them.
+	// WebToolsEnabled is the global switch for web search and page fetch.
+	WebToolsEnabled bool `json:"webToolsEnabled"`
+	// SearchProvider selects the web search backend: "brave" or "ollama".
+	// Empty means "brave".
+	SearchProvider string `json:"searchProvider"`
+	// BraveAPIKey enables the Brave Search backend. Empty disables it.
+	BraveAPIKey string `json:"braveApiKey"`
+	// OllamaAPIKey enables the Ollama backend. Empty disables it.
 	OllamaAPIKey string `json:"ollamaApiKey"`
 	// Theme is the UI color theme: "system", "light", or "dark". Empty is
 	// normalized to "system".
@@ -37,8 +44,10 @@ type Config struct {
 // Default returns the configuration used on first launch.
 func Default() Config {
 	return Config{
-		BaseURL: "https://api.openai.com/v1",
-		Theme:   "system",
+		BaseURL:         "https://api.openai.com/v1",
+		WebToolsEnabled: false,
+		SearchProvider:  "brave",
+		Theme:           "system",
 	}
 }
 
@@ -71,7 +80,7 @@ func (m *Manager) Load() (Config, error) {
 		return Config{}, fmt.Errorf("config: read %s: %w", m.path, err)
 	}
 
-	var cfg Config
+	cfg := Default()
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("config: parse %s: %w", m.path, err)
 	}
@@ -83,6 +92,7 @@ func (m *Manager) Save(cfg Config) error {
 	cfg.BaseURL = strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
 	cfg.ChatModel = strings.TrimSpace(cfg.ChatModel)
 	cfg.TitleModel = strings.TrimSpace(cfg.TitleModel)
+	cfg.BraveAPIKey = strings.TrimSpace(cfg.BraveAPIKey)
 	cfg.OllamaAPIKey = strings.TrimSpace(cfg.OllamaAPIKey)
 	switch cfg.Theme {
 	case "", "system":

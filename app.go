@@ -604,8 +604,14 @@ func (a *App) streamReply(thread db.Thread, cfg config.Config, model string, sto
 	defer a.clearStreamCancel()
 
 	var web *webtools.Client
-	if thread.WebTools && cfg.OllamaAPIKey != "" {
-		web = webtools.New(cfg.OllamaAPIKey)
+	if cfg.WebToolsEnabled && thread.WebTools {
+		key := cfg.BraveAPIKey
+		if cfg.SearchProvider == webtools.ProviderOllama {
+			key = cfg.OllamaAPIKey
+		}
+		if key != "" {
+			web = webtools.New(cfg.SearchProvider, key)
+		}
 	}
 
 	var reply, reasoning strings.Builder

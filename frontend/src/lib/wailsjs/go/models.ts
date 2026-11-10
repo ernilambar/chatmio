@@ -11,6 +11,9 @@ export namespace config {
 	    topP?: number;
 	    maxTokens?: number;
 	    frequencyPenalty?: number;
+	    webToolsEnabled: boolean;
+	    searchProvider: string;
+	    braveApiKey: string;
 	    ollamaApiKey: string;
 	    theme: string;
 	
@@ -30,6 +33,9 @@ export namespace config {
 	        this.topP = source["topP"];
 	        this.maxTokens = source["maxTokens"];
 	        this.frequencyPenalty = source["frequencyPenalty"];
+	        this.webToolsEnabled = source["webToolsEnabled"];
+	        this.searchProvider = source["searchProvider"];
+	        this.braveApiKey = source["braveApiKey"];
 	        this.ollamaApiKey = source["ollamaApiKey"];
 	        this.theme = source["theme"];
 	    }

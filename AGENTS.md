@@ -5,8 +5,12 @@
 Chatmio is a macOS desktop client for OpenAI-compatible chat APIs. The backend is Go
 (Wails v2) and the frontend is Svelte 5 + TypeScript + Vite + Tailwind CSS 4.
 
-Optional web tools: `pkg/webtools` exposes `web_search` / `web_fetch` backed by the Ollama web API
-(`ollamaApiKey` in config). `streamReply` in `app.go` runs the OpenAI tool-call loop (max 5 rounds);
+Optional web tools: `pkg/webtools` exposes `web_search` / `web_fetch` backed by either the Brave
+Search API or the Ollama web API. `searchProvider` in config selects the backend (default `brave`)
+and `braveApiKey` / `ollamaApiKey` hold its key; `webToolsEnabled` is the global switch (off by
+default) and the selected key must also be set to enable the tools.
+`web_fetch` reads pages directly under Brave and rejects loopback/private addresses; under Ollama it
+uses Ollama's fetch endpoint. `streamReply` in `app.go` runs the OpenAI tool-call loop (max 5 rounds);
 tool steps are stored on the assistant message for display only and are not replayed to the model.
 
 ## Setup

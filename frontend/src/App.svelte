@@ -133,7 +133,12 @@
     streamText={chat.streamText}
     streamReasoning={chat.streamReasoning}
     streamTools={chat.streamTools}
-    webToolsAvailable={!!chat.config?.ollamaApiKey}
+    webToolsAvailable={!!(
+      chat.config?.webToolsEnabled &&
+      (chat.config?.searchProvider === 'ollama'
+        ? chat.config?.ollamaApiKey
+        : chat.config?.braveApiKey)
+    )}
     onwebtoolschange={(enabled) => chat.setThreadWebTools(enabled)}
     contextUsed={chat.contextUsed}
     contextWindow={chat.contextWindow}
