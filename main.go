@@ -21,6 +21,7 @@ func main() {
 		Height:           800,
 		MinWidth:         900,
 		MinHeight:        600,
+		WindowStartState: options.Maximised,
 		BackgroundColour: &options.RGBA{R: 15, G: 17, B: 21, A: 1},
 		AssetServer: &assetserver.Options{
 			Assets: assets,
