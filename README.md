@@ -11,6 +11,9 @@ Fast macOS desktop client for any OpenAI-compatible API.
 - Temporary chats (⌘⇧N) stay in memory only and are discarded when you leave the chat or quit the
   app.
 - Stop a streaming reply with the stop button or Esc; received text is kept.
+- Test the provider connection from Settings before saving; a reply that receives no data for two
+  minutes stops with an error instead of hanging.
+- The Help menu opens the documentation and the issue tracker.
 - Shortcuts: ⌘N new chat, ⌘⇧N temporary chat, ⌘K search, ⌘L focus composer, ⌘, settings, Esc stop.
 
 ## Requirements

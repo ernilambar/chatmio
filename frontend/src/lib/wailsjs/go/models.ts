@@ -240,6 +240,8 @@ export namespace main {
 	    description: string;
 	    copyright: string;
 	    icon: string;
+	    docsUrl: string;
+	    issuesUrl: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AboutInfo(source);
@@ -252,6 +254,8 @@ export namespace main {
 	        this.description = source["description"];
 	        this.copyright = source["copyright"];
 	        this.icon = source["icon"];
+	        this.docsUrl = source["docsUrl"];
+	        this.issuesUrl = source["issuesUrl"];
 	    }
 	}
 

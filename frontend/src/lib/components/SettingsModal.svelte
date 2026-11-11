@@ -1,8 +1,9 @@
 <script lang="ts">
   import { untrack } from 'svelte'
   import { Monitor, Moon, RefreshCw, Sun, X } from 'lucide-svelte'
-  import { ListModels } from '../wailsjs/go/main/App'
+  import { ListModels, TestConnection } from '../wailsjs/go/main/App'
   import { config } from '../wailsjs/go/models'
+  import { trapFocus } from '../focus'
   import { theme, type ThemeMode } from '../stores/theme.svelte'
   import ModelCombobox from './ModelCombobox.svelte'
 
@@ -53,6 +54,8 @@
   let modelsLoading = $state(false)
   let modelsError = $state<string | null>(null)
   let saving = $state(false)
+  let testing = $state(false)
+  let testResult = $state<{ ok: boolean; message: string } | null>(null)
   let error = $state<string | null>(null)
 
   const sectionTitle = $derived(sections.find((item) => item.id === section)?.label ?? 'Settings')
@@ -91,6 +94,15 @@
     }
   })
 
+  // A result belongs to the values it was produced from; editing any of them
+  // makes it stale.
+  $effect(() => {
+    baseUrl
+    apiKey
+    chatModel
+    testResult = null
+  })
+
   async function loadModels(): Promise<void> {
     const url = baseUrl.trim()
     modelsError = null
@@ -112,6 +124,30 @@
       modelsError = err instanceof Error ? err.message : String(err)
     } finally {
       modelsLoading = false
+    }
+  }
+
+  async function testConnection(): Promise<void> {
+    const url = baseUrl.trim()
+    const key = apiKey.trim()
+    const model = chatModel.trim()
+    if (!url) {
+      testResult = { ok: false, message: 'Set a base URL first.' }
+      return
+    }
+    const current = (): boolean =>
+      baseUrl.trim() === url && apiKey.trim() === key && chatModel.trim() === model
+    testing = true
+    testResult = null
+    try {
+      const message = await TestConnection(url, key, model)
+      if (current()) testResult = { ok: true, message }
+    } catch (err) {
+      if (current()) {
+        testResult = { ok: false, message: err instanceof Error ? err.message : String(err) }
+      }
+    } finally {
+      testing = false
     }
   }
 
@@ -170,6 +206,10 @@
 {#if open}
   <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
     <div
+      use:trapFocus
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="settings-title"
       class="flex h-[560px] max-h-[85vh] w-full max-w-3xl overflow-hidden rounded-lg border border-line bg-surface shadow-xl"
     >
       <aside class="flex w-48 shrink-0 flex-col gap-0.5 border-r border-line bg-panel p-2">
@@ -190,7 +230,7 @@
 
       <form class="flex min-w-0 flex-1 flex-col" onsubmit={submit}>
         <div class="flex items-center justify-between border-b border-line px-5 py-3">
-          <h2 class="text-sm font-semibold">{sectionTitle}</h2>
+          <h2 id="settings-title" class="text-sm font-semibold">{sectionTitle}</h2>
           <button
             type="button"
             class="rounded-md p-1 text-muted hover:text-fg"
@@ -331,6 +371,29 @@
                   placeholder="sk-…"
                 />
               </label>
+
+              <div class="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  class="rounded-md border border-line px-2 py-1 text-xs text-muted transition-colors hover:text-fg disabled:opacity-40"
+                  disabled={testing || !baseUrl.trim()}
+                  onclick={() => void testConnection()}
+                >
+                  {testing ? 'Testing…' : 'Test Connection'}
+                </button>
+                {#if testResult}
+                  <span
+                    role="status"
+                    aria-live="polite"
+                    class="min-w-0 flex-1 truncate text-xs {testResult.ok
+                      ? 'text-emerald-500'
+                      : 'text-red-500'}"
+                    title={testResult.message}
+                  >
+                    {testResult.message}
+                  </span>
+                {/if}
+              </div>
 
               <div class="flex items-center justify-between">
                 <span class="text-xs text-muted">Models</span>

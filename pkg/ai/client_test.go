@@ -3,12 +3,14 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStreamChatParsesReasoningAndUsage(t *testing.T) {
@@ -112,5 +114,37 @@ func TestAPIErrorPrefersProviderMessage(t *testing.T) {
 	resp = &http.Response{Status: "502 Bad Gateway", Body: io.NopCloser(strings.NewReader("upstream down"))}
 	if got, want := apiError(resp).Error(), "ai: 502 Bad Gateway: upstream down"; got != want {
 		t.Fatalf("apiError = %q, want %q", got, want)
+	}
+}
+
+func TestStreamChatStopsAfterIdleTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n")
+		w.(http.Flusher).Flush()
+		// Never send another byte; the client must give up on its own.
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
+	}))
+	defer server.Close()
+
+	client := New(server.URL, "", nil)
+	client.IdleTimeout = 100 * time.Millisecond
+
+	var content strings.Builder
+	_, err := client.StreamChat(context.Background(), ChatOptions{Model: "m"}, func(delta Delta) {
+		content.WriteString(delta.Content)
+	})
+	if !errors.Is(err, ErrStreamStalled) {
+		t.Fatalf("err = %v, want ErrStreamStalled", err)
+	}
+	if content.String() != "Hi" {
+		t.Fatalf("content = %q, want Hi", content.String())
+	}
+	if !strings.Contains(err.Error(), "no data for") {
+		t.Fatalf("err = %q, want idle duration", err)
 	}
 }

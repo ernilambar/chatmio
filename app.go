@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +32,7 @@ const (
 	titleMaxTokens         = 512
 	titleTimeout           = 30 * time.Second
 	listModelsTimeout      = 15 * time.Second
+	testConnectionTimeout  = 30 * time.Second
 	titlePrompt            = "Generate a short title for this conversation. Reply with only the title: 3 to 6 words, no quotes, no trailing punctuation."
 	maxAttachments         = 10
 	maxAttachmentBytes     = 10 << 20
@@ -402,6 +404,55 @@ func (a *App) ListModels(baseURL, apiKey string) ([]string, error) {
 	return ai.New(baseURL, apiKey, nil).ListModels(ctx)
 }
 
+// TestConnection verifies the provider settings the user is editing, before
+// they are saved. GET /models confirms the URL and key; when the provider does
+// not implement it, a one-token completion proves the URL, key and model work
+// together.
+func (a *App) TestConnection(baseURL, apiKey, model string) (string, error) {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return "", errors.New("base URL is required")
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, testConnectionTimeout)
+	defer cancel()
+
+	client := ai.New(baseURL, apiKey, nil)
+	model = strings.TrimSpace(model)
+
+	models, err := client.ListModels(ctx)
+	if err == nil {
+		switch {
+		case model == "":
+			return fmt.Sprintf("Connected. %d models available.", len(models)), nil
+		case slices.Contains(models, model):
+			return fmt.Sprintf("Connected. %s is available.", model), nil
+		default:
+			return fmt.Sprintf("Connected, but the provider does not list %s.", model), nil
+		}
+	}
+
+	// Some compatible providers do not implement GET /models; a completion is
+	// the only way to check them, so only fall back for that case.
+	var statusErr *ai.StatusError
+	if model == "" || !errors.As(err, &statusErr) ||
+		(statusErr.StatusCode != http.StatusNotFound && statusErr.StatusCode != http.StatusMethodNotAllowed) {
+		return "", err
+	}
+	maxTokens := 1
+	if _, chatErr := client.StreamChat(ctx, ai.ChatOptions{
+		Model:     model,
+		Messages:  []ai.Message{{Role: ai.RoleUser, Content: "ping"}},
+		MaxTokens: &maxTokens,
+	}, func(ai.Delta) {}); chatErr != nil {
+		return "", chatErr
+	}
+	return "Connected.", nil
+}
+
 // SendMessage stores the user message, streams the assistant reply via
 // chat:delta events and persists the final message. It returns when streaming
 // finishes.
@@ -666,6 +717,9 @@ func (a *App) streamReply(thread db.Thread, cfg config.Config, model string, sto
 	// cancellation during shutdown, is reported to the caller.
 	stopped := false
 	if err != nil {
+		if errors.Is(err, ai.ErrStreamStalled) {
+			return errors.New("the provider stopped responding. Try again.")
+		}
 		if errors.Is(streamCtx.Err(), context.Canceled) && a.ctx.Err() == nil {
 			stopped = true
 		} else {

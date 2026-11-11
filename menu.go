@@ -19,9 +19,16 @@ func applicationMenu(app *App) *menu.Menu {
 	appMenu.AddSeparator()
 	appMenu.AddText("Quit "+name, keys.CmdOrCtrl("q"), func(*menu.CallbackData) { runtime.Quit(app.ctx) })
 
+	// The Help menu carries the documentation and issue tracker links so they
+	// stay reachable when the About dialog or the README is not at hand.
+	helpMenu := menu.NewMenu()
+	helpMenu.AddText("Documentation", nil, func(*menu.CallbackData) { app.openURL(docsURL) })
+	helpMenu.AddText("Report an Issue", nil, func(*menu.CallbackData) { app.openURL(issuesURL) })
+
 	return menu.NewMenuFromItems(
 		menu.SubMenu(name, appMenu),
 		menu.EditMenu(),
 		menu.WindowMenu(),
+		menu.SubMenu("Help", helpMenu),
 	)
 }

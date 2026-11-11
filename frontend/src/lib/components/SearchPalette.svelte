@@ -2,6 +2,7 @@
   import { Search, X } from 'lucide-svelte'
   import type { db } from '../wailsjs/go/models'
   import { SearchThreads } from '../wailsjs/go/main/App'
+  import { trapFocus } from '../focus'
 
   let {
     open,
@@ -105,6 +106,7 @@
       onclick={onclose}
     ></button>
     <div
+      use:trapFocus
       class="relative w-full max-w-lg overflow-hidden rounded-lg border border-line bg-surface shadow-xl"
       role="dialog"
       aria-modal="true"

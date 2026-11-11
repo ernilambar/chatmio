@@ -6,11 +6,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"sort"
 	"strings"
+	"sync/atomic"
+	"time"
 )
 
 // Role is a chat message role accepted by OpenAI-compatible APIs.
@@ -119,21 +122,33 @@ type Usage struct {
 	ReasoningTokens  int
 }
 
+// DefaultIdleTimeout is how long a stream may go without receiving any data
+// before the request is abandoned.
+const DefaultIdleTimeout = 2 * time.Minute
+
+// ErrStreamStalled reports that a provider stopped sending data for longer
+// than the client's idle timeout.
+var ErrStreamStalled = errors.New("ai: provider stopped sending data")
+
 // Client talks to one OpenAI-compatible endpoint.
 type Client struct {
 	BaseURL string
 	APIKey  string
 	Headers map[string]string
 	HTTP    *http.Client
+	// IdleTimeout bounds how long a request or stream may go without data.
+	// Zero uses DefaultIdleTimeout.
+	IdleTimeout time.Duration
 }
 
 // New returns a client for baseURL (for example https://api.openai.com/v1).
 func New(baseURL, apiKey string, headers map[string]string) *Client {
 	return &Client{
-		BaseURL: strings.TrimRight(baseURL, "/"),
-		APIKey:  apiKey,
-		Headers: headers,
-		HTTP:    http.DefaultClient,
+		BaseURL:     strings.TrimRight(baseURL, "/"),
+		APIKey:      apiKey,
+		Headers:     headers,
+		HTTP:        http.DefaultClient,
+		IdleTimeout: DefaultIdleTimeout,
 	}
 }
 
@@ -144,6 +159,20 @@ func (c *Client) setHeaders(req *http.Request) {
 	for key, value := range c.Headers {
 		req.Header.Set(key, value)
 	}
+}
+
+// StatusError is a non-success HTTP response from the provider.
+type StatusError struct {
+	StatusCode int
+	Status     string
+	Message    string
+}
+
+func (e *StatusError) Error() string {
+	if e.Message == "" {
+		return "ai: " + e.Status
+	}
+	return "ai: " + e.Status + ": " + e.Message
 }
 
 // apiError describes a failed response. Providers usually wrap the reason in
@@ -161,10 +190,7 @@ func apiError(resp *http.Response) error {
 			message = msg
 		}
 	}
-	if message == "" {
-		return fmt.Errorf("ai: %s", resp.Status)
-	}
-	return fmt.Errorf("ai: %s: %s", resp.Status, message)
+	return &StatusError{StatusCode: resp.StatusCode, Status: resp.Status, Message: message}
 }
 
 // ListModels returns the model identifiers exposed by GET /models.
@@ -294,7 +320,19 @@ func (c *Client) StreamChat(ctx context.Context, opts ChatOptions, onDelta func(
 		return reply, fmt.Errorf("ai: encode request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/chat/completions", bytes.NewReader(payload))
+	idle := c.IdleTimeout
+	if idle <= 0 {
+		idle = DefaultIdleTimeout
+	}
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var lastActivity atomic.Int64
+	var stalled atomic.Bool
+	lastActivity.Store(time.Now().UnixNano())
+	go watchIdle(streamCtx, idle, &lastActivity, &stalled, cancel)
+
+	req, err := http.NewRequestWithContext(streamCtx, http.MethodPost, c.BaseURL+"/chat/completions", bytes.NewReader(payload))
 	if err != nil {
 		return reply, fmt.Errorf("ai: build request: %w", err)
 	}
@@ -304,9 +342,10 @@ func (c *Client) StreamChat(ctx context.Context, opts ChatOptions, onDelta func(
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return reply, fmt.Errorf("ai: request failed: %w", err)
+		return reply, streamError(err, &stalled, idle)
 	}
 	defer resp.Body.Close()
+	lastActivity.Store(time.Now().UnixNano())
 
 	if resp.StatusCode != http.StatusOK {
 		return reply, apiError(resp)
@@ -315,6 +354,7 @@ func (c *Client) StreamChat(ctx context.Context, opts ChatOptions, onDelta func(
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
+		lastActivity.Store(time.Now().UnixNano())
 		line := strings.TrimSpace(scanner.Text())
 		data, ok := strings.CutPrefix(line, "data:")
 		if !ok {
@@ -354,10 +394,50 @@ func (c *Client) StreamChat(ctx context.Context, opts ChatOptions, onDelta func(
 			onDelta(Delta{Content: delta.Content, Reasoning: reasoning})
 		}
 	}
+	if stalled.Load() {
+		return reply, streamError(context.Canceled, &stalled, idle)
+	}
 	if err := scanner.Err(); err != nil {
 		return reply, fmt.Errorf("ai: read stream: %w", err)
 	}
 	return reply, nil
+}
+
+// watchIdle cancels the request when no data arrives for longer than idle.
+func watchIdle(ctx context.Context, idle time.Duration, last *atomic.Int64, stalled *atomic.Bool, cancel context.CancelFunc) {
+	interval := idle / 4
+	if interval > time.Second {
+		interval = time.Second
+	}
+	if interval < 10*time.Millisecond {
+		interval = 10 * time.Millisecond
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if time.Since(time.Unix(0, last.Load())) >= idle {
+				stalled.Store(true)
+				cancel()
+				return
+			}
+		}
+	}
+}
+
+// streamError turns a cancellation caused by the idle watchdog into a
+// recognisable error while leaving user and shutdown cancellations intact.
+func streamError(err error, stalled *atomic.Bool, idle time.Duration) error {
+	if stalled.Load() {
+		return fmt.Errorf("%w (no data for %s)", ErrStreamStalled, idle)
+	}
+	if err == context.Canceled {
+		return err
+	}
+	return fmt.Errorf("ai: request failed: %w", err)
 }
 
 // mergeToolCall folds one streamed tool-call fragment into calls. Fragments

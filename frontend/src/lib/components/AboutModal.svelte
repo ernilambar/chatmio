@@ -3,6 +3,8 @@
   import { X } from 'lucide-svelte'
   import { GetAboutInfo } from '../wailsjs/go/main/App'
   import { main } from '../wailsjs/go/models'
+  import { BrowserOpenURL } from '../wailsjs/runtime/runtime'
+  import { trapFocus } from '../focus'
 
   let { open, onclose }: { open: boolean; onclose: () => void } = $props()
 
@@ -21,6 +23,10 @@
       onclose()
     }
   }
+
+  function openLink(url: string | undefined): void {
+    if (url) BrowserOpenURL(url)
+  }
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
@@ -34,6 +40,7 @@
     }}
   >
     <div
+      use:trapFocus
       class="relative w-full max-w-sm rounded-xl border border-line bg-surface px-6 pb-6 pt-8 text-center shadow-xl"
       role="dialog"
       aria-modal="true"
@@ -55,6 +62,28 @@
         {#if info.description}
           <p class="mx-auto mt-4 max-w-64 text-sm leading-relaxed text-muted">{info.description}</p>
         {/if}
+        <p class="mt-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs">
+          {#if info.docsUrl}
+            <a
+              href={info.docsUrl}
+              onclick={(event) => {
+                event.preventDefault()
+                openLink(info?.docsUrl)
+              }}
+              class="text-muted underline-offset-2 hover:text-fg hover:underline">Documentation</a
+            >
+          {/if}
+          {#if info.issuesUrl}
+            <a
+              href={info.issuesUrl}
+              onclick={(event) => {
+                event.preventDefault()
+                openLink(info?.issuesUrl)
+              }}
+              class="text-muted underline-offset-2 hover:text-fg hover:underline">Report an Issue</a
+            >
+          {/if}
+        </p>
         {#if info.copyright}
           <p class="mt-5 text-[11px] text-muted">{info.copyright}</p>
         {/if}

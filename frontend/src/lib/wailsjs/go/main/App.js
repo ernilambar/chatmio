@@ -73,3 +73,7 @@ export function SetThreadSettings(arg1, arg2) {
 export function SetThreadWebTools(arg1, arg2) {
   return window['go']['main']['App']['SetThreadWebTools'](arg1, arg2);
 }
+
+export function TestConnection(arg1, arg2, arg3) {
+  return window['go']['main']['App']['TestConnection'](arg1, arg2, arg3);
+}

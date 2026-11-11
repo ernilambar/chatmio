@@ -12,6 +12,12 @@ import (
 // aboutEvent tells the frontend to open the About dialog.
 const aboutEvent = "app:about"
 
+// docsURL and issuesURL back the About dialog and the Help menu.
+const (
+	docsURL   = "https://github.com/ernilambar/chatmio#readme"
+	issuesURL = "https://github.com/ernilambar/chatmio/issues"
+)
+
 //go:embed wails.json
 var wailsConfig []byte
 
@@ -27,6 +33,8 @@ type AboutInfo struct {
 	Description string `json:"description"`
 	Copyright   string `json:"copyright"`
 	Icon        string `json:"icon"`
+	DocsURL     string `json:"docsUrl"`
+	IssuesURL   string `json:"issuesUrl"`
 }
 
 type appDetails struct {
@@ -74,6 +82,8 @@ func (a *App) GetAboutInfo() AboutInfo {
 		Description: details.Description,
 		Copyright:   details.Copyright,
 		Icon:        "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString(appIconSVG),
+		DocsURL:     docsURL,
+		IssuesURL:   issuesURL,
 	}
 }
 
@@ -81,5 +91,12 @@ func (a *App) GetAboutInfo() AboutInfo {
 func (a *App) openAbout() {
 	if a.ctx != nil {
 		runtime.EventsEmit(a.ctx, aboutEvent)
+	}
+}
+
+// openURL opens a documentation or support link in the system browser.
+func (a *App) openURL(url string) {
+	if a.ctx != nil {
+		runtime.BrowserOpenURL(a.ctx, url)
 	}
 }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { X } from 'lucide-svelte'
   import { db } from '../wailsjs/go/models'
+  import { trapFocus } from '../focus'
 
   let {
     open,
@@ -84,13 +85,19 @@
 <svelte:window onkeydown={handleWindowKeydown} />
 
 {#if open && thread}
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+  <div
+    use:trapFocus
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="chat-settings-title"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+  >
     <form
       class="max-h-full w-full max-w-md overflow-y-auto rounded-lg border border-line bg-surface p-5 shadow-xl"
       onsubmit={submit}
     >
       <div class="mb-4 flex items-center justify-between">
-        <h2 class="text-sm font-semibold">Chat settings</h2>
+        <h2 id="chat-settings-title" class="text-sm font-semibold">Chat settings</h2>
         <button type="button" class="rounded-md p-1 text-muted hover:text-fg" title="Close" onclick={onclose}>
           <X size={16} />
         </button>

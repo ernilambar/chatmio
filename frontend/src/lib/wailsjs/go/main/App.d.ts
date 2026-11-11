@@ -39,3 +39,5 @@ export function SetThreadModel(arg1:string,arg2:string):Promise<void>;
 export function SetThreadSettings(arg1:string,arg2:db.ThreadSettings):Promise<void>;
 
 export function SetThreadWebTools(arg1:string,arg2:boolean):Promise<void>;
+
+export function TestConnection(arg1:string,arg2:string,arg3:string):Promise<string>;
