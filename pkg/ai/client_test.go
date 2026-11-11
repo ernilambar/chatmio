@@ -63,6 +63,52 @@ func TestStreamChatParsesReasoningAndUsage(t *testing.T) {
 	}
 }
 
+func TestStreamChatFallsBackToJSONResponse(t *testing.T) {
+	var request map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{
+			"choices": [{
+				"message": {
+					"content": "Fallback reply",
+					"reasoning_content": "checked",
+					"tool_calls": [{
+						"id": "call_1",
+						"type": "function",
+						"function": {"name": "web_search", "arguments": "{\"query\":\"go\"}"}
+					}]
+				}
+			}],
+			"usage": {"prompt_tokens": 5, "completion_tokens": 9, "completion_tokens_details": {"reasoning_tokens": 2}}
+		}`)
+	}))
+	defer server.Close()
+
+	var content, reasoning string
+	reply, err := New(server.URL, "", nil).StreamChat(context.Background(), ChatOptions{Model: "m"}, func(delta Delta) {
+		content += delta.Content
+		reasoning += delta.Reasoning
+	})
+	if err != nil {
+		t.Fatalf("StreamChat: %v", err)
+	}
+	if content != "Fallback reply" || reasoning != "checked" {
+		t.Fatalf("content = %q, reasoning = %q", content, reasoning)
+	}
+	if reply.Usage != (Usage{PromptTokens: 5, CompletionTokens: 9, ReasoningTokens: 2}) {
+		t.Fatalf("usage = %+v", reply.Usage)
+	}
+	if len(reply.ToolCalls) != 1 || reply.ToolCalls[0].ID != "call_1" || reply.ToolCalls[0].Function.Name != "web_search" {
+		t.Fatalf("tool calls = %+v", reply.ToolCalls)
+	}
+	if request["stream"] != true {
+		t.Fatalf("stream = %v, want true", request["stream"])
+	}
+}
+
 func TestStreamChatCollectsToolCalls(t *testing.T) {
 	var request map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

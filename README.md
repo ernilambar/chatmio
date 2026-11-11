@@ -6,8 +6,10 @@ Fast macOS desktop client for any OpenAI-compatible API.
 
 - Searchable model picker with per-chat model selection.
 - Streaming replies with GitHub-flavored Markdown, syntax highlighting, and copy buttons.
+- Falls back to a plain JSON response when a provider ignores streaming.
 - Image and text-file attachments; unsupported binary files are rejected before sending.
 - Search chats and messages (⌘K); rename, delete, retry, regenerate, or edit messages.
+- Empty chats show a time-of-day greeting and a few suggested prompts.
 - Temporary chats (⌘⇧N) stay in memory only and are discarded when you leave the chat or quit the
   app.
 - Stop a streaming reply with the stop button or Esc; received text is kept.

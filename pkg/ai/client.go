@@ -255,6 +255,18 @@ type chatRequest struct {
 	} `json:"stream_options"`
 }
 
+type usagePayload struct {
+	PromptTokens            int `json:"prompt_tokens"`
+	CompletionTokens        int `json:"completion_tokens"`
+	CompletionTokensDetails *struct {
+		ReasoningTokens int `json:"reasoning_tokens"`
+	} `json:"completion_tokens_details"`
+}
+
+type errorPayload struct {
+	Message string `json:"message"`
+}
+
 type streamChunk struct {
 	Choices []struct {
 		Delta struct {
@@ -271,16 +283,30 @@ type streamChunk struct {
 			} `json:"tool_calls"`
 		} `json:"delta"`
 	} `json:"choices"`
-	Usage *struct {
-		PromptTokens            int `json:"prompt_tokens"`
-		CompletionTokens        int `json:"completion_tokens"`
-		CompletionTokensDetails *struct {
-			ReasoningTokens int `json:"reasoning_tokens"`
-		} `json:"completion_tokens_details"`
-	} `json:"usage"`
-	Error *struct {
-		Message string `json:"message"`
-	} `json:"error"`
+	Usage *usagePayload `json:"usage"`
+	Error *errorPayload `json:"error"`
+}
+
+// completionResponse is a non-streaming chat completion. Some
+// OpenAI-compatible providers ignore `stream` and answer with one JSON object.
+type completionResponse struct {
+	Choices []struct {
+		Message struct {
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+			Reasoning        string `json:"reasoning"`
+			ToolCalls        []struct {
+				ID       string `json:"id"`
+				Type     string `json:"type"`
+				Function struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				} `json:"function"`
+			} `json:"tool_calls"`
+		} `json:"message"`
+	} `json:"choices"`
+	Usage *usagePayload `json:"usage"`
+	Error *errorPayload `json:"error"`
 }
 
 // Reply is the result of a finished stream.
@@ -351,7 +377,16 @@ func (c *Client) StreamChat(ctx context.Context, opts ChatOptions, onDelta func(
 		return reply, apiError(resp)
 	}
 
-	scanner := bufio.NewScanner(resp.Body)
+	reader := bufio.NewReader(resp.Body)
+	if isJSONResponse(reader) {
+		reply, err := readCompletion(reader, &lastActivity, onDelta)
+		if err != nil && stalled.Load() {
+			return reply, streamError(context.Canceled, &stalled, idle)
+		}
+		return reply, err
+	}
+
+	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		lastActivity.Store(time.Now().UnixNano())
@@ -399,6 +434,82 @@ func (c *Client) StreamChat(ctx context.Context, opts ChatOptions, onDelta func(
 	}
 	if err := scanner.Err(); err != nil {
 		return reply, fmt.Errorf("ai: read stream: %w", err)
+	}
+	return reply, nil
+}
+
+// isJSONResponse reports whether the body starts with a JSON object instead of
+// an SSE frame. It peeks without consuming input.
+func isJSONResponse(reader *bufio.Reader) bool {
+	for n := 1; n <= 64; n++ {
+		buf, err := reader.Peek(n)
+		for _, b := range buf {
+			switch b {
+			case ' ', '\t', '\r', '\n':
+				continue
+			}
+			return b == '{'
+		}
+		if err != nil {
+			return false
+		}
+	}
+	return false
+}
+
+// activityReader records the time of the last successful read so the idle
+// watchdog also covers non-streaming replies.
+type activityReader struct {
+	reader io.Reader
+	last   *atomic.Int64
+}
+
+func (r activityReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if n > 0 {
+		r.last.Store(time.Now().UnixNano())
+	}
+	return n, err
+}
+
+// readCompletion parses one non-streaming completion body and reports its text
+// through onDelta so callers handle it like a streamed reply.
+func readCompletion(reader io.Reader, last *atomic.Int64, onDelta func(Delta)) (Reply, error) {
+	var reply Reply
+	body, err := io.ReadAll(activityReader{reader: reader, last: last})
+	if err != nil {
+		return reply, fmt.Errorf("ai: read response: %w", err)
+	}
+
+	var completion completionResponse
+	if err := json.Unmarshal(body, &completion); err != nil {
+		return reply, fmt.Errorf("ai: decode response: %w", err)
+	}
+	if completion.Error != nil {
+		return reply, fmt.Errorf("ai: %s", completion.Error.Message)
+	}
+	if completion.Usage != nil {
+		reply.Usage.PromptTokens = completion.Usage.PromptTokens
+		reply.Usage.CompletionTokens = completion.Usage.CompletionTokens
+		if details := completion.Usage.CompletionTokensDetails; details != nil {
+			reply.Usage.ReasoningTokens = details.ReasoningTokens
+		}
+	}
+	if len(completion.Choices) == 0 {
+		return reply, nil
+	}
+
+	message := completion.Choices[0].Message
+	reasoning := message.ReasoningContent
+	if reasoning == "" {
+		reasoning = message.Reasoning
+	}
+	if message.Content != "" || reasoning != "" {
+		onDelta(Delta{Content: message.Content, Reasoning: reasoning})
+	}
+	for i, call := range message.ToolCalls {
+		index := i
+		reply.ToolCalls = mergeToolCall(reply.ToolCalls, &index, call.ID, call.Function.Name, call.Function.Arguments)
 	}
 	return reply, nil
 }

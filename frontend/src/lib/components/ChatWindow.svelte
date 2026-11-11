@@ -86,8 +86,41 @@
     onshowsidebar?: () => void
   } = $props()
 
+  const SUGGESTIONS = [
+    'Explain how Python decorators work with a short example',
+    'Write a short poem about the ocean',
+    'Compare React and Vue for a small side project',
+    'Explain recursion in simple terms with an example',
+    'Draft a to-do list for moving to a new apartment',
+    'Give me five birthday gift ideas for a 30-year-old who loves hiking',
+    'Explain what a 404 error means and how to fix a broken link',
+    'Write a professional email declining a meeting invitation',
+    'Explain quantum computing in simple terms',
+    'Suggest a healthy meal plan for the week',
+    'Roast my procrastination habit, but keep it gentle',
+    'Write a haiku about a build that fails at the last second',
+    'Explain why cats knock things off tables as a nature documentary',
+    'Give me a polite excuse to leave a party early',
+    'Invent a new holiday and explain how people celebrate it'
+  ]
+
+  function greeting(): string {
+    const hour = new Date().getHours()
+    return hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
+  }
+
+  function pickSuggestions(count: number): string[] {
+    const pool = [...SUGGESTIONS]
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[pool[i], pool[j]] = [pool[j], pool[i]]
+    }
+    return pool.slice(0, count)
+  }
+
   let draft = $state('')
   let files = $state<File[]>([])
+  let suggestions = $state<string[]>(pickSuggestions(3))
   let fileInput: HTMLInputElement | undefined = $state()
   let inputEl: HTMLTextAreaElement | undefined = $state()
   let scroller: HTMLDivElement | undefined = $state()
@@ -102,6 +135,7 @@
   let atBottom = $state(true)
 
   const selectedModel = $derived(thread?.model || defaultModel)
+  const greetingText = $derived(greeting())
   const lastMessageId = $derived(
     messages.length > 0 ? messages[messages.length - 1].id : null
   )
@@ -142,6 +176,7 @@
       lastThreadId = id
       draft = ''
       files = []
+      suggestions = pickSuggestions(3)
       renaming = false
       confirmingDelete = false
       editing = null
@@ -256,6 +291,11 @@
 
   function handleDragOver(event: DragEvent): void {
     event.preventDefault()
+  }
+
+  function useSuggestion(text: string): void {
+    draft = text
+    inputEl?.focus()
   }
 
   function startRename(): void {
@@ -462,16 +502,28 @@
       class="h-full overflow-y-auto px-6 py-4"
     >
     {#if messages.length === 0 && !streaming}
-      <div class="flex h-full flex-col items-center justify-center gap-2 text-muted">
+      <div class="flex h-full flex-col items-center justify-center gap-3 text-center text-muted">
         <MessageSquare size={28} />
         {#if !thread}
           <p class="text-sm">
             {defaultModel ? 'Start a new chat.' : 'Set a chat model in settings to start a chat.'}
           </p>
         {:else}
+          <p class="text-lg font-medium text-fg">{greetingText}</p>
           <p class="text-sm">
-            {temporary ? 'Temporary chat. Messages are not saved.' : 'Send a message to start the conversation.'}
+            {temporary ? 'Temporary chat. Messages are not saved.' : 'What would you like to work on?'}
           </p>
+          <div class="mt-1 flex max-w-xl flex-wrap justify-center gap-2">
+            {#each suggestions as suggestion (suggestion)}
+              <button
+                type="button"
+                class="rounded-full border border-line bg-panel px-3 py-1.5 text-xs text-fg/80 transition-colors hover:border-accent/60 hover:text-fg"
+                onclick={() => useSuggestion(suggestion)}
+              >
+                {suggestion}
+              </button>
+            {/each}
+          </div>
         {/if}
       </div>
     {:else}
