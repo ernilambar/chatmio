@@ -665,6 +665,8 @@ func (a *App) streamReply(thread db.Thread, cfg config.Config, model string, sto
 		}
 	}
 
+	started := time.Now()
+	var firstToken time.Duration
 	var reply, reasoning strings.Builder
 	var usage ai.Usage
 	var steps []db.ToolStep
@@ -690,6 +692,9 @@ func (a *App) streamReply(thread db.Thread, cfg config.Config, model string, sto
 			ReasoningEffort:  thread.ReasoningEffort,
 			Tools:            tools,
 		}, func(delta ai.Delta) {
+			if firstToken == 0 {
+				firstToken = time.Since(started)
+			}
 			reply.WriteString(delta.Content)
 			reasoning.WriteString(delta.Reasoning)
 			runtime.EventsEmit(a.ctx, "chat:delta", chatDelta{
@@ -739,6 +744,8 @@ func (a *App) streamReply(thread db.Thread, cfg config.Config, model string, sto
 		PromptTokens:     usage.PromptTokens,
 		CompletionTokens: usage.CompletionTokens,
 		ReasoningTokens:  usage.ReasoningTokens,
+		DurationMs:       time.Since(started).Milliseconds(),
+		FirstTokenMs:     firstToken.Milliseconds(),
 		Tools:            steps,
 		CreatedAt:        time.Now().UnixMilli(),
 	}

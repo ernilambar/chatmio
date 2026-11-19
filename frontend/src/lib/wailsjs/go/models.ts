@@ -112,6 +112,8 @@ export namespace db {
 	    promptTokens: number;
 	    completionTokens: number;
 	    reasoningTokens: number;
+	    durationMs: number;
+	    firstTokenMs: number;
 	    attachments?: Attachment[];
 	    tools?: ToolStep[];
 	    createdAt: number;
@@ -130,6 +132,8 @@ export namespace db {
 	        this.promptTokens = source["promptTokens"];
 	        this.completionTokens = source["completionTokens"];
 	        this.reasoningTokens = source["reasoningTokens"];
+	        this.durationMs = source["durationMs"];
+	        this.firstTokenMs = source["firstTokenMs"];
 	        this.attachments = this.convertValues(source["attachments"], Attachment);
 	        this.tools = this.convertValues(source["tools"], ToolStep);
 	        this.createdAt = source["createdAt"];

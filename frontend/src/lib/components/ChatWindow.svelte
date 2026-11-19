@@ -25,7 +25,7 @@
   import { copyText } from '../clipboard'
   import { speak, speechSupported, stopSpeaking } from '../speech'
   import Markdown from './Markdown.svelte'
-  import { formatTokens, splitThinking } from '../reasoning'
+  import { formatDuration, formatTokens, splitThinking } from '../reasoning'
   import type { StreamTool } from '../stores/chat.svelte'
 
   let {
@@ -624,6 +624,15 @@
               {#if message.role === 'assistant' && (message.promptTokens > 0 || message.completionTokens > 0)}
                 <span class="ml-1 text-[11px] text-muted" title={usageTitle(message)}>
                   {formatTokens(message.promptTokens)} in · {formatTokens(message.completionTokens)} out
+                </span>
+              {/if}
+              {#if message.role === 'assistant' && message.durationMs > 0}
+                <span
+                  class="ml-1 text-[11px] text-muted"
+                  title={`First token: ${formatDuration(message.firstTokenMs)}\nFull reply: ${formatDuration(message.durationMs)}`}
+                >
+                  {#if message.firstTokenMs > 0}{formatDuration(message.firstTokenMs)} first ·{/if}
+                  {formatDuration(message.durationMs)} total
                 </span>
               {/if}
               </div>

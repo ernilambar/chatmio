@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS messages (
 	prompt_tokens     INTEGER NOT NULL DEFAULT 0,
 	completion_tokens INTEGER NOT NULL DEFAULT 0,
 	reasoning_tokens  INTEGER NOT NULL DEFAULT 0,
+	duration_ms       INTEGER NOT NULL DEFAULT 0,
+	first_token_ms    INTEGER NOT NULL DEFAULT 0,
 	tools             TEXT    NOT NULL DEFAULT '',
 	created_at        INTEGER NOT NULL
 );
@@ -93,7 +95,9 @@ type ThreadSettings struct {
 }
 
 // Message is a persisted chat message. Token counts are zero when the
-// provider did not report usage.
+// provider did not report usage. DurationMs and FirstTokenMs time an assistant
+// reply from request to stream end and to the first streamed token; zero
+// otherwise.
 type Message struct {
 	ID               string       `json:"id"`
 	ThreadID         string       `json:"threadId"`
@@ -103,6 +107,8 @@ type Message struct {
 	PromptTokens     int          `json:"promptTokens"`
 	CompletionTokens int          `json:"completionTokens"`
 	ReasoningTokens  int          `json:"reasoningTokens"`
+	DurationMs       int64        `json:"durationMs"`
+	FirstTokenMs     int64        `json:"firstTokenMs"`
 	Attachments      []Attachment `json:"attachments,omitempty"`
 	Tools            []ToolStep   `json:"tools,omitempty"`
 	CreatedAt        int64        `json:"createdAt"`
@@ -472,10 +478,10 @@ func (s *Store) AddMessage(m Message) error {
 	if _, err := tx.Exec(
 		`INSERT INTO messages (
 			id, thread_id, role, content, reasoning,
-			prompt_tokens, completion_tokens, reasoning_tokens, tools, created_at
-		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			prompt_tokens, completion_tokens, reasoning_tokens, duration_ms, first_token_ms, tools, created_at
+		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.ID, m.ThreadID, m.Role, m.Content, m.Reasoning,
-		m.PromptTokens, m.CompletionTokens, m.ReasoningTokens, tools, m.CreatedAt); err != nil {
+		m.PromptTokens, m.CompletionTokens, m.ReasoningTokens, m.DurationMs, m.FirstTokenMs, tools, m.CreatedAt); err != nil {
 		return fmt.Errorf("db: add message: %w", err)
 	}
 
@@ -536,7 +542,7 @@ func (s *Store) DeleteMessagesAfter(threadID, messageID string) error {
 func (s *Store) ListMessages(threadID string) ([]Message, error) {
 	rows, err := s.db.Query(`
 		SELECT id, thread_id, role, content, reasoning,
-		       prompt_tokens, completion_tokens, reasoning_tokens, tools, created_at
+		       prompt_tokens, completion_tokens, reasoning_tokens, duration_ms, first_token_ms, tools, created_at
 		FROM messages
 		WHERE thread_id = ?
 		ORDER BY created_at, rowid`, threadID)
@@ -550,7 +556,7 @@ func (s *Store) ListMessages(threadID string) ([]Message, error) {
 		var tools string
 		if err := rows.Scan(
 			&m.ID, &m.ThreadID, &m.Role, &m.Content, &m.Reasoning,
-			&m.PromptTokens, &m.CompletionTokens, &m.ReasoningTokens, &tools, &m.CreatedAt,
+			&m.PromptTokens, &m.CompletionTokens, &m.ReasoningTokens, &m.DurationMs, &m.FirstTokenMs, &tools, &m.CreatedAt,
 		); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("db: scan message: %w", err)
