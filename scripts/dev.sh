@@ -78,7 +78,12 @@ else
     fi
 
     printf '==> wails build (debug)\n'
-    "$wails" build -clean -debug -platform darwin/arm64
+    # Same macOS 15 floor as the release bundle, in the plist and the Mach-O.
+    deployment_target="15.0"
+    export CGO_CFLAGS="${CGO_CFLAGS:+$CGO_CFLAGS }-mmacosx-version-min=$deployment_target"
+    export CGO_LDFLAGS="${CGO_LDFLAGS:+$CGO_LDFLAGS }-mmacosx-version-min=$deployment_target"
+    "$wails" build -clean -debug -platform darwin/arm64 \
+        -ldflags "-linkmode=external -extldflags=-mmacosx-version-min=$deployment_target"
     find frontend/src/lib/wailsjs -type f -exec chmod 644 {} +
     app="$root/build/bin/$project_name.app"
 fi

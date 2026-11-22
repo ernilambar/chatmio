@@ -20,7 +20,7 @@ Fast macOS desktop client for any OpenAI-compatible API.
 
 ## Requirements
 
-- macOS on Apple silicon (arm64 only)
+- macOS 15 (Sequoia) or later on Apple silicon (arm64 only)
 - An OpenAI-compatible API endpoint and key
 
 ## Install
