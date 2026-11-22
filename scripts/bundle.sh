@@ -105,12 +105,20 @@ printf '==> go test\n'
 go test ./...
 
 printf '==> wails build (release)\n'
+# Releases require macOS 15 or later. Info.plist advertises the floor to
+# LaunchServices, and the cgo deployment target stamps it into the Mach-O as
+# well; Go's internal linker would otherwise default to an older minimum.
+deployment_target="15.0"
+export CGO_CFLAGS="${CGO_CFLAGS:+$CGO_CFLAGS }-mmacosx-version-min=$deployment_target"
+export CGO_LDFLAGS="${CGO_LDFLAGS:+$CGO_LDFLAGS }-mmacosx-version-min=$deployment_target"
 rm -rf dist
 mkdir -p dist
 # -s skips the second frontend build; the gate above already produced
 # frontend/dist. -skipbindings reuses the bindings checked above, and -m keeps
-# go.mod untouched. Production mode adds the linker's -s -w flags.
-"$wails" build -clean -platform darwin/arm64 -trimpath -s -skipbindings -m
+# go.mod untouched. Production mode adds the linker's -s -w flags. External
+# linking is forced so extldflags' deployment target is not dropped.
+"$wails" build -clean -platform darwin/arm64 -trimpath -s -skipbindings -m \
+    -ldflags "-linkmode=external -extldflags=-mmacosx-version-min=$deployment_target"
 
 built_app="$root/build/bin/$project_name.app"
 if [ ! -d "$built_app" ]; then
@@ -124,6 +132,18 @@ ditto "$built_app" "$dist_app"
 app_arch="$(lipo -archs "$dist_app/Contents/MacOS/$output_name")"
 if [ "$app_arch" != "arm64" ]; then
     printf 'error: expected arm64 app binary, got: %s\n' "$app_arch" >&2
+    exit 1
+fi
+
+min_version="$(plutil -extract LSMinimumSystemVersion raw -o - "$dist_app/Contents/Info.plist" 2>/dev/null || true)"
+if [ "$min_version" != "$deployment_target" ]; then
+    printf 'error: expected LSMinimumSystemVersion %s, got: %s\n' "$deployment_target" "$min_version" >&2
+    exit 1
+fi
+
+binary_version="$(vtool -show-build "$dist_app/Contents/MacOS/$output_name" | awk '/minos/ { print $2; exit }')"
+if [ "$binary_version" != "$deployment_target" ]; then
+    printf 'error: expected Mach-O minos %s, got: %s\n' "$deployment_target" "$binary_version" >&2
     exit 1
 fi
 

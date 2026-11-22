@@ -1,11 +1,12 @@
 # Contributing
 
-Contributions are welcome. This project targets macOS on Apple silicon only; keep changes working
+Contributions are welcome. This project targets macOS 15 on Apple silicon only; keep changes working
 on arm64 and do not add Intel, universal, or non-macOS build paths.
 
 ## Prerequisites
 
 - macOS on Apple silicon
+- macOS 15 (Sequoia) or later
 - Go (version from `go.mod`)
 - Node.js 24
 - Xcode command line tools
