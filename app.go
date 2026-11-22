@@ -8,6 +8,7 @@ import (
 	"log"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -388,6 +389,24 @@ func (a *App) DeleteThread(threadID string) error {
 	return nil
 }
 
+// openCodeSessionHeaders returns the stable per-conversation session header
+// OpenCode Go requires to route inference requests. Other providers ignore the
+// header, so it is only sent to opencode.ai hosts.
+func openCodeSessionHeaders(baseURL, sessionID string) map[string]string {
+	if sessionID == "" {
+		return nil
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return nil
+	}
+	host := strings.ToLower(u.Hostname())
+	if host != "opencode.ai" && !strings.HasSuffix(host, ".opencode.ai") {
+		return nil
+	}
+	return map[string]string{"x-opencode-session": sessionID}
+}
+
 // ListModels fetches available model identifiers for the provider settings the
 // user is editing, even before they are saved.
 func (a *App) ListModels(baseURL, apiKey string) ([]string, error) {
@@ -420,7 +439,8 @@ func (a *App) TestConnection(baseURL, apiKey, model string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, testConnectionTimeout)
 	defer cancel()
 
-	client := ai.New(baseURL, apiKey, nil)
+	// A one-off check still needs a session ID on OpenCode Go inference.
+	client := ai.New(baseURL, apiKey, openCodeSessionHeaders(baseURL, uuid.NewString()))
 	model = strings.TrimSpace(model)
 
 	models, err := client.ListModels(ctx)
@@ -648,7 +668,7 @@ func (a *App) streamReply(thread db.Thread, cfg config.Config, model string, sto
 		prompt = append(prompt, toAIMessage(m))
 	}
 
-	client := ai.New(cfg.BaseURL, cfg.APIKey, nil)
+	client := ai.New(cfg.BaseURL, cfg.APIKey, openCodeSessionHeaders(cfg.BaseURL, thread.ID))
 	streamCtx, cancel := context.WithCancel(a.ctx)
 	defer cancel()
 	a.setStreamCancel(cancel)
@@ -846,7 +866,7 @@ func (a *App) queueTitle(thread db.Thread, cfg config.Config, model, source stri
 			a.titleMu.Unlock()
 		}()
 
-		client := ai.New(cfg.BaseURL, cfg.APIKey, nil)
+		client := ai.New(cfg.BaseURL, cfg.APIKey, openCodeSessionHeaders(cfg.BaseURL, thread.ID))
 		title := a.generateTitle(client, cfg, model, source)
 		changed, err := a.store.SetThreadTitleIfUnchanged(thread.ID, thread.Title, title)
 		if err != nil {

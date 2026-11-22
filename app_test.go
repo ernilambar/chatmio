@@ -39,6 +39,33 @@ func TestTestConnectionReportsModels(t *testing.T) {
 	}
 }
 
+func TestOpenCodeSessionHeaders(t *testing.T) {
+	const session = "123e4567-e89b-12d3-a456-426614174000"
+	for _, baseURL := range []string{
+		"https://opencode.ai/inference/go/v1",
+		"https://opencode.ai/zen/go/v1",
+		"https://opencode.ai/zen/v1",
+		"https://console.opencode.ai/v1",
+	} {
+		if got := openCodeSessionHeaders(baseURL, session)["x-opencode-session"]; got != session {
+			t.Errorf("%s: session = %q, want %q", baseURL, got, session)
+		}
+	}
+	for _, baseURL := range []string{
+		"https://api.openai.com/v1",
+		"https://notopencode.ai/v1",
+		"https://opencode.ai.evil.test/v1",
+		"",
+	} {
+		if got := openCodeSessionHeaders(baseURL, session); got != nil {
+			t.Errorf("%s: headers = %v, want nil", baseURL, got)
+		}
+	}
+	if got := openCodeSessionHeaders("https://opencode.ai/inference/go/v1", ""); got != nil {
+		t.Errorf("headers = %v, want nil for empty session", got)
+	}
+}
+
 func TestTestConnectionReportsProviderError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

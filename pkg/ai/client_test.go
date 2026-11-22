@@ -194,3 +194,19 @@ func TestStreamChatStopsAfterIdleTimeout(t *testing.T) {
 		t.Fatalf("err = %q, want idle duration", err)
 	}
 }
+
+func TestStreamChatSendsCustomHeaders(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("x-opencode-session"); got != "session-1" {
+			t.Errorf("x-opencode-session = %q, want session-1", got)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	headers := map[string]string{"x-opencode-session": "session-1"}
+	if _, err := New(server.URL, "", headers).StreamChat(context.Background(), ChatOptions{Model: "m"}, func(Delta) {}); err != nil {
+		t.Fatalf("StreamChat: %v", err)
+	}
+}
