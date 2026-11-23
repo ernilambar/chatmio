@@ -67,6 +67,13 @@
   const titleOptions = $derived(
     Array.from(new Set([titleModel, chatModel, ...models].filter((model) => model !== '')))
   )
+  const modelsStatus = $derived(
+    modelsLoading
+      ? { tone: 'muted', text: 'Loading models from the provider…' }
+      : modelsError
+        ? { tone: 'error', text: `${modelsError} Enter the model ID manually.` }
+        : { tone: 'ok', text: `Connected · ${models.length} models` }
+  )
 
   $effect(() => {
     if (open && cfg) {
@@ -399,64 +406,74 @@
                 {/if}
               </div>
 
-              <div class="flex items-center justify-between">
-                <span class="text-xs text-muted">Models</span>
-                <button
-                  type="button"
-                  class="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted hover:text-fg disabled:opacity-40"
-                  onclick={() => void loadModels()}
-                  disabled={modelsLoading}
+              {#if baseUrl.trim()}
+                <div class="flex items-center justify-between">
+                  <span class="text-xs text-muted">Models</span>
+                  <button
+                    type="button"
+                    class="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted hover:text-fg disabled:opacity-40"
+                    onclick={() => void loadModels()}
+                    disabled={modelsLoading}
+                  >
+                    <RefreshCw size={12} class={modelsLoading ? 'animate-spin' : ''} />
+                    Refresh
+                  </button>
+                </div>
+
+                <p
+                  role="status"
+                  aria-live="polite"
+                  class="text-[11px] {modelsStatus.tone === 'ok'
+                    ? 'text-emerald-500'
+                    : modelsStatus.tone === 'error'
+                      ? 'text-amber-500'
+                      : 'text-muted'}"
                 >
-                  <RefreshCw size={12} class={modelsLoading ? 'animate-spin' : ''} />
-                  Refresh
-                </button>
-              </div>
-
-              <label class="block space-y-1">
-                <span class="text-xs text-muted">Chat model</span>
-                {#if models.length > 0}
-                  <ModelCombobox
-                    bind:value={chatModel}
-                    options={modelOptions}
-                    placeholder="Select a chat model"
-                  />
-                {:else}
-                  <input
-                    bind:value={chatModel}
-                    class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
-                    placeholder="gpt-4o-mini"
-                  />
-                {/if}
-              </label>
-
-              <label class="block space-y-1">
-                <span class="text-xs text-muted">Title model</span>
-                {#if models.length > 0}
-                  <ModelCombobox
-                    bind:value={titleModel}
-                    options={titleOptions}
-                    placeholder="Same as chat model"
-                    allowEmpty
-                    emptyLabel="Same as chat model"
-                  />
-                {:else}
-                  <input
-                    bind:value={titleModel}
-                    class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
-                    placeholder="Same as chat model"
-                  />
-                {/if}
-                <span class="text-[11px] text-muted">Leave empty to use the chat model.</span>
-              </label>
-
-              {#if modelsLoading}
-                <p class="text-[11px] text-muted">Loading models from the provider…</p>
-              {:else if modelsError}
-                <p class="text-[11px] text-amber-500">
-                  {modelsError} Enter the model ID manually.
+                  {modelsStatus.text}
                 </p>
+
+                <label class="block space-y-1">
+                  <span class="text-xs text-muted">Chat model</span>
+                  {#if models.length > 0}
+                    <ModelCombobox
+                      bind:value={chatModel}
+                      options={modelOptions}
+                      placeholder="Select a chat model"
+                    />
+                  {:else}
+                    <input
+                      bind:value={chatModel}
+                      class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+                      placeholder="gpt-4o-mini"
+                    />
+                  {/if}
+                </label>
+
+                {#if chatModel.trim()}
+                  <label class="block space-y-1">
+                    <span class="text-xs text-muted">Title model</span>
+                    {#if models.length > 0}
+                      <ModelCombobox
+                        bind:value={titleModel}
+                        options={titleOptions}
+                        placeholder="Same as chat model"
+                        allowEmpty
+                        emptyLabel="Same as chat model"
+                      />
+                    {:else}
+                      <input
+                        bind:value={titleModel}
+                        class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+                        placeholder="Same as chat model"
+                      />
+                    {/if}
+                    <span class="text-[11px] text-muted">Leave empty to use the chat model.</span>
+                  </label>
+                {/if}
               {:else}
-                <p class="text-[11px] text-muted">{models.length} models loaded.</p>
+                <p class="text-[11px] text-muted">
+                  Set a base URL to load models and choose a chat model.
+                </p>
               {/if}
             </div>
           {:else}
@@ -485,64 +502,63 @@
                 still turn it off. The chat model must support tool calling.
               </p>
 
-              <label class="block space-y-1">
-                <span class="text-xs text-muted">Search provider</span>
-                <select
-                  bind:value={searchProvider}
-                  class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
-                >
-                  <option value="parallel">Parallel (no API key)</option>
-                  <option value="brave">Brave Search</option>
-                  <option value="ollama">Ollama</option>
-                </select>
-              </label>
+              {#if webSearch}
+                <label class="block space-y-1">
+                  <span class="text-xs text-muted">Search provider</span>
+                  <select
+                    bind:value={searchProvider}
+                    class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+                  >
+                    <option value="parallel">Parallel (no API key)</option>
+                    <option value="brave">Brave Search</option>
+                    <option value="ollama">Ollama</option>
+                  </select>
+                </label>
 
-              {#if searchProvider === 'parallel'}
-                <label class="block space-y-1">
-                  <span class="text-xs text-muted">Parallel API key (optional)</span>
-                  <input
-                    bind:value={parallelApiKey}
-                    type="password"
-                    disabled={!webSearch}
-                    class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent disabled:opacity-60"
-                    placeholder="Optional"
-                  />
-                  <span class="text-[11px] text-muted">
-                    Without a key, search and fetch use Parallel's free tier at lower rate
-                    limits. Queries and fetched URLs are sent to mcp.parallel.ai. A key raises
-                    the limits and bills that Parallel account.
-                  </span>
-                </label>
-              {:else if searchProvider === 'brave'}
-                <label class="block space-y-1">
-                  <span class="text-xs text-muted">Brave Search API key</span>
-                  <input
-                    bind:value={braveApiKey}
-                    type="password"
-                    disabled={!webSearch}
-                    class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent disabled:opacity-60"
-                    placeholder="Required"
-                  />
-                  <span class="text-[11px] text-muted">
-                    Queries are sent to api.search.brave.com. The chat model must support tool
-                    calling.
-                  </span>
-                </label>
-              {:else}
-                <label class="block space-y-1">
-                  <span class="text-xs text-muted">Ollama API key</span>
-                  <input
-                    bind:value={ollamaApiKey}
-                    type="password"
-                    disabled={!webSearch}
-                    class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent disabled:opacity-60"
-                    placeholder="Required"
-                  />
-                  <span class="text-[11px] text-muted">
-                    Queries and fetched URLs are sent to ollama.com. The chat model must support
-                    tool calling.
-                  </span>
-                </label>
+                {#if searchProvider === 'parallel'}
+                  <label class="block space-y-1">
+                    <span class="text-xs text-muted">Parallel API key (optional)</span>
+                    <input
+                      bind:value={parallelApiKey}
+                      type="password"
+                      class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+                      placeholder="Optional"
+                    />
+                    <span class="text-[11px] text-muted">
+                      Without a key, search and fetch use Parallel's free tier at lower rate
+                      limits. Queries and fetched URLs are sent to mcp.parallel.ai. A key raises
+                      the limits and bills that Parallel account.
+                    </span>
+                  </label>
+                {:else if searchProvider === 'brave'}
+                  <label class="block space-y-1">
+                    <span class="text-xs text-muted">Brave Search API key</span>
+                    <input
+                      bind:value={braveApiKey}
+                      type="password"
+                      class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+                      placeholder="Required"
+                    />
+                    <span class="text-[11px] text-muted">
+                      Queries are sent to api.search.brave.com. The chat model must support tool
+                      calling.
+                    </span>
+                  </label>
+                {:else}
+                  <label class="block space-y-1">
+                    <span class="text-xs text-muted">Ollama API key</span>
+                    <input
+                      bind:value={ollamaApiKey}
+                      type="password"
+                      class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+                      placeholder="Required"
+                    />
+                    <span class="text-[11px] text-muted">
+                      Queries and fetched URLs are sent to ollama.com. The chat model must support
+                      tool calling.
+                    </span>
+                  </label>
+                {/if}
               {/if}
 
               {#if !webSearch}
