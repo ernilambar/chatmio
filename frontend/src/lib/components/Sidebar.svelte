@@ -49,29 +49,37 @@
       >
         <Search size={16} />
       </button>
-      <button
-        class="rounded-md p-1.5 transition-colors disabled:opacity-40 disabled:pointer-events-none {temporaryActive
-          ? 'bg-surface text-fg'
-          : 'text-muted hover:bg-surface hover:text-fg'}"
+      <span
+        class="inline-flex"
         title={!canCreate
           ? 'Set a chat model in settings'
           : newTemporaryOpen
             ? 'Temporary chat already open'
             : 'Temporary chat (⌘⇧N, not saved)'}
-        aria-pressed={temporaryActive}
-        disabled={!canCreate || newTemporaryOpen}
-        onclick={oncreatetemporary}
       >
-        <Ghost size={16} />
-      </button>
-      <button
-        class="rounded-md p-1.5 text-muted transition-colors hover:bg-surface hover:text-fg disabled:opacity-40 disabled:pointer-events-none"
+        <button
+          class="rounded-md p-1.5 transition-colors disabled:opacity-40 disabled:pointer-events-none {temporaryActive
+            ? 'bg-surface text-fg'
+            : 'text-muted hover:bg-surface hover:text-fg'}"
+          aria-pressed={temporaryActive}
+          disabled={!canCreate || newTemporaryOpen}
+          onclick={oncreatetemporary}
+        >
+          <Ghost size={16} />
+        </button>
+      </span>
+      <span
+        class="inline-flex"
         title={!canCreate ? 'Set a chat model in settings' : newChatOpen ? 'New chat already open' : 'New chat (⌘N)'}
-        disabled={!canCreate || newChatOpen}
-        onclick={oncreate}
       >
-        <Plus size={16} />
-      </button>
+        <button
+          class="rounded-md p-1.5 text-muted transition-colors hover:bg-surface hover:text-fg disabled:opacity-40 disabled:pointer-events-none"
+          disabled={!canCreate || newChatOpen}
+          onclick={oncreate}
+        >
+          <Plus size={16} />
+        </button>
+      </span>
     </div>
   </div>
 
