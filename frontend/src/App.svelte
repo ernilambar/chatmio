@@ -137,7 +137,9 @@
       chat.config?.webToolsEnabled &&
       (chat.config?.searchProvider === 'ollama'
         ? chat.config?.ollamaApiKey
-        : chat.config?.braveApiKey)
+        : chat.config?.searchProvider === 'brave'
+          ? chat.config?.braveApiKey
+          : true)
     )}
     onwebtoolschange={(enabled) => chat.setThreadWebTools(enabled)}
     contextUsed={chat.contextUsed}

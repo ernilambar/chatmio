@@ -5,13 +5,17 @@
 Chatmio is a macOS desktop client for OpenAI-compatible chat APIs. The backend is Go
 (Wails v2) and the frontend is Svelte 5 + TypeScript + Vite + Tailwind CSS 4.
 
-Optional web tools: `pkg/webtools` exposes `web_search` / `web_fetch` backed by either the Brave
-Search API or the Ollama web API. `searchProvider` in config selects the backend (default `brave`)
-and `braveApiKey` / `ollamaApiKey` hold its key; `webToolsEnabled` is the global switch (off by
-default) and the selected key must also be set to enable the tools.
-`web_fetch` reads pages directly under Brave and rejects loopback/private addresses; under Ollama it
-uses Ollama's fetch endpoint. `streamReply` in `app.go` runs the OpenAI tool-call loop (max 5 rounds);
-tool steps are stored on the assistant message for display only and are not replayed to the model.
+Optional web tools: `pkg/webtools` exposes `web_search` / `web_fetch` backed by Parallel's
+hosted MCP server, the Brave Search API, or the Ollama web API. `searchProvider` in config selects
+the backend (default `parallel`) and `parallelApiKey` / `braveApiKey` / `ollamaApiKey` hold its key;
+`webToolsEnabled` is the global switch (on by default; each chat still has its own web tools
+toggle, so nothing is sent off the machine until a chat enables it). Parallel works without a key on
+its free anonymous tier and its search takes `objective` + `search_queries`, so
+`Client.Definitions` returns provider-specific schemas; Brave and Ollama need a key before the tools
+are enabled. Parallel and
+Ollama fetch pages through their own APIs; Brave fetches locally and rejects loopback/private
+addresses. `streamReply` in `app.go` runs the OpenAI tool-call loop (max 5 rounds); tool steps are
+stored on the assistant message for display only and are not replayed to the model.
 
 ## Setup
 

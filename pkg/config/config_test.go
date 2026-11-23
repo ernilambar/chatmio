@@ -19,13 +19,13 @@ func load(t *testing.T, body string) Config {
 	return cfg
 }
 
-func TestLoadDisablesWebToolsByDefault(t *testing.T) {
+func TestLoadEnablesWebToolsByDefault(t *testing.T) {
 	cfg := load(t, `{"baseUrl":"https://example.com"}`)
-	if cfg.WebToolsEnabled {
-		t.Fatal("WebToolsEnabled = true, want the default false")
+	if !cfg.WebToolsEnabled {
+		t.Fatal("WebToolsEnabled = false, want the default true")
 	}
-	if cfg.SearchProvider != "brave" {
-		t.Fatalf("SearchProvider = %q, want brave", cfg.SearchProvider)
+	if cfg.SearchProvider != "parallel" {
+		t.Fatalf("SearchProvider = %q, want parallel", cfg.SearchProvider)
 	}
 }
 
@@ -36,5 +36,12 @@ func TestLoadKeepsExplicitWebToolsOn(t *testing.T) {
 	}
 	if cfg.SearchProvider != "ollama" {
 		t.Fatalf("SearchProvider = %q, want ollama", cfg.SearchProvider)
+	}
+}
+
+func TestLoadKeepsExplicitWebToolsOff(t *testing.T) {
+	cfg := load(t, `{"webToolsEnabled":false}`)
+	if cfg.WebToolsEnabled {
+		t.Fatal("WebToolsEnabled = true, want explicit false")
 	}
 }

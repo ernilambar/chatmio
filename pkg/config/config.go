@@ -29,9 +29,12 @@ type Config struct {
 	FrequencyPenalty *float64 `json:"frequencyPenalty,omitempty"`
 	// WebToolsEnabled is the global switch for web search and page fetch.
 	WebToolsEnabled bool `json:"webToolsEnabled"`
-	// SearchProvider selects the web search backend: "brave" or "ollama".
-	// Empty means "brave".
+	// SearchProvider selects the web search backend: "parallel", "brave", or
+	// "ollama". Empty means "parallel".
 	SearchProvider string `json:"searchProvider"`
+	// ParallelAPIKey is optional. Without one, Parallel runs on its free
+	// anonymous MCP tier at lower rate limits.
+	ParallelAPIKey string `json:"parallelApiKey"`
 	// BraveAPIKey enables the Brave Search backend. Empty disables it.
 	BraveAPIKey string `json:"braveApiKey"`
 	// OllamaAPIKey enables the Ollama backend. Empty disables it.
@@ -45,8 +48,8 @@ type Config struct {
 func Default() Config {
 	return Config{
 		BaseURL:         "https://api.openai.com/v1",
-		WebToolsEnabled: false,
-		SearchProvider:  "brave",
+		WebToolsEnabled: true,
+		SearchProvider:  "parallel",
 		Theme:           "system",
 	}
 }
@@ -94,6 +97,7 @@ func (m *Manager) Save(cfg Config) error {
 	cfg.TitleModel = strings.TrimSpace(cfg.TitleModel)
 	cfg.BraveAPIKey = strings.TrimSpace(cfg.BraveAPIKey)
 	cfg.OllamaAPIKey = strings.TrimSpace(cfg.OllamaAPIKey)
+	cfg.ParallelAPIKey = strings.TrimSpace(cfg.ParallelAPIKey)
 	switch cfg.Theme {
 	case "", "system":
 		cfg.Theme = "system"
