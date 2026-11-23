@@ -264,6 +264,20 @@ export namespace main {
 	        this.issuesUrl = source["issuesUrl"];
 	    }
 	}
+	export class ModelList {
+	    models: string[];
+	    listed: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ModelList(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.models = source["models"];
+	        this.listed = source["listed"];
+	    }
+	}
 
 }
 

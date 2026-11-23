@@ -114,6 +114,43 @@ func TestTestConnectionFallsBackToCompletion(t *testing.T) {
 	}
 }
 
+func TestListModelsClassifiesFailures(t *testing.T) {
+	status := http.StatusOK
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if status != http.StatusOK {
+			w.WriteHeader(status)
+			fmt.Fprint(w, `{"error":{"message":"Incorrect API key provided"}}`)
+			return
+		}
+		fmt.Fprint(w, `{"data":[{"id":"model-a"}]}`)
+	}))
+	defer server.Close()
+	app := &App{}
+
+	got, err := app.ListModels(server.URL, "key")
+	if err != nil || !got.Listed || len(got.Models) != 1 {
+		t.Fatalf("ListModels = %+v, %v; want one listed model", got, err)
+	}
+
+	status = http.StatusNotFound
+	got, err = app.ListModels(server.URL, "key")
+	if err != nil || got.Listed || got.Models == nil {
+		t.Fatalf("ListModels on 404 = %+v, %v; want unlisted, no error", got, err)
+	}
+
+	status = http.StatusUnauthorized
+	_, err = app.ListModels(server.URL, "bad")
+	if err == nil || !strings.HasPrefix(err.Error(), "API key rejected: Incorrect API key provided") {
+		t.Fatalf("err = %v, want API key rejection", err)
+	}
+
+	server.Close()
+	_, err = app.ListModels(server.URL, "key")
+	if err == nil || !strings.HasPrefix(err.Error(), "cannot reach the provider") {
+		t.Fatalf("err = %v, want unreachable provider", err)
+	}
+}
+
 // newSeededApp returns an App wired to a temporary config file and stores, so
 // thread creation can be exercised without touching the user's data.
 func newSeededApp(t *testing.T, cfg config.Config) *App {

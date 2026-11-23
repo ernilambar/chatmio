@@ -55,6 +55,11 @@
   let models = $state<string[]>([])
   let modelsLoading = $state(false)
   let modelsError = $state<string | null>(null)
+  // False when the provider does not implement GET /models.
+  let modelsListed = $state(true)
+  // The base URL and key the current model list belongs to. Plain variable so
+  // the reload effect does not track it.
+  let modelsFor = ''
   let saving = $state(false)
   let testing = $state(false)
   let testResult = $state<{ ok: boolean; message: string } | null>(null)
@@ -71,8 +76,13 @@
     modelsLoading
       ? { tone: 'muted', text: 'Loading models from the provider…' }
       : modelsError
-        ? { tone: 'error', text: `${modelsError} Enter the model ID manually.` }
-        : { tone: 'ok', text: `Connected · ${models.length} models` }
+        ? { tone: 'error', text: modelsError }
+        : !modelsListed
+          ? {
+              tone: 'error',
+              text: "The provider doesn't list models. Enter the model ID, then test the connection."
+            }
+          : { tone: 'ok', text: `Connected · ${models.length} models` }
   )
 
   $effect(() => {
@@ -113,27 +123,54 @@
     testResult = null
   })
 
+  // The model list belongs to the base URL and key it was loaded with; editing
+  // either drops it and reloads once typing pauses.
+  $effect(() => {
+    if (!open) return
+    const target = modelsTarget(baseUrl, apiKey)
+    if (target === modelsFor) return
+    models = []
+    modelsError = null
+    modelsListed = true
+    modelsLoading = true
+    const timer = setTimeout(() => void loadModels(), 600)
+    return () => clearTimeout(timer)
+  })
+
+  function modelsTarget(url: string, key: string): string {
+    return `${url.trim()}\n${key}`
+  }
+
   async function loadModels(): Promise<void> {
     const url = baseUrl.trim()
+    const key = apiKey
+    const target = modelsTarget(url, key)
+    modelsFor = target
     modelsError = null
+    modelsListed = true
     if (!url) {
       models = []
+      modelsLoading = false
       modelsError = 'Set a base URL to load models.'
       return
     }
 
     modelsLoading = true
     try {
-      const next = await ListModels(url, apiKey)
-      models = next
-      if (next.length === 0) {
+      const next = await ListModels(url, key)
+      // A newer edit or refresh owns the result.
+      if (modelsFor !== target) return
+      models = next.models
+      modelsListed = next.listed
+      if (next.listed && next.models.length === 0) {
         modelsError = 'The provider returned no models.'
       }
     } catch (err) {
+      if (modelsFor !== target) return
       models = []
       modelsError = err instanceof Error ? err.message : String(err)
     } finally {
-      modelsLoading = false
+      if (modelsFor === target) modelsLoading = false
     }
   }
 

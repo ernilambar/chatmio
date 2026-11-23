@@ -20,7 +20,7 @@ export function GetConfig():Promise<config.Config>;
 
 export function GetMessages(arg1:string):Promise<Array<db.Message>>;
 
-export function ListModels(arg1:string,arg2:string):Promise<Array<string>>;
+export function ListModels(arg1:string,arg2:string):Promise<main.ModelList>;
 
 export function ListThreads():Promise<Array<db.Thread>>;
 

@@ -424,12 +424,21 @@ func openCodeSessionHeaders(baseURL, sessionID string) map[string]string {
 	return map[string]string{"x-opencode-session": sessionID}
 }
 
+// ModelList is the result of ListModels.
+type ModelList struct {
+	Models []string `json:"models"`
+	// Listed is false when the provider does not implement GET /models, so the
+	// model ID has to be entered by hand.
+	Listed bool `json:"listed"`
+}
+
 // ListModels fetches available model identifiers for the provider settings the
-// user is editing, even before they are saved.
-func (a *App) ListModels(baseURL, apiKey string) ([]string, error) {
+// user is editing, even before they are saved. A provider without GET /models
+// is not an error; failures that a typed model ID cannot fix are.
+func (a *App) ListModels(baseURL, apiKey string) (ModelList, error) {
 	baseURL = strings.TrimSpace(baseURL)
 	if baseURL == "" {
-		return nil, errors.New("base URL is required")
+		return ModelList{}, errors.New("base URL is required")
 	}
 	ctx := a.ctx
 	if ctx == nil {
@@ -437,7 +446,32 @@ func (a *App) ListModels(baseURL, apiKey string) ([]string, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, listModelsTimeout)
 	defer cancel()
-	return ai.New(baseURL, apiKey, nil).ListModels(ctx)
+
+	models, err := ai.New(baseURL, apiKey, nil).ListModels(ctx)
+	if err == nil {
+		return ModelList{Models: models, Listed: true}, nil
+	}
+	var statusErr *ai.StatusError
+	if errors.As(err, &statusErr) {
+		switch statusErr.StatusCode {
+		case http.StatusNotFound, http.StatusMethodNotAllowed:
+			return ModelList{Models: []string{}}, nil
+		case http.StatusUnauthorized, http.StatusForbidden:
+			if statusErr.Message == "" {
+				return ModelList{}, fmt.Errorf("API key rejected (%s)", statusErr.Status)
+			}
+			return ModelList{}, fmt.Errorf("API key rejected: %s", statusErr.Message)
+		}
+		return ModelList{}, err
+	}
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		if urlErr.Timeout() {
+			return ModelList{}, errors.New("provider did not respond in time")
+		}
+		return ModelList{}, fmt.Errorf("cannot reach the provider: %v", urlErr.Err)
+	}
+	return ModelList{}, err
 }
 
 // TestConnection verifies the provider settings the user is editing, before

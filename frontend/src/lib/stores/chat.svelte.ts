@@ -215,7 +215,7 @@ class ChatStore {
       return
     }
     try {
-      this.models = await ListModels(cfg.baseUrl, cfg.apiKey)
+      this.models = (await ListModels(cfg.baseUrl, cfg.apiKey)).models
     } catch {
       this.models = []
     }
