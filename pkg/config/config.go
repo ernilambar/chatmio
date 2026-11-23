@@ -27,7 +27,9 @@ type Config struct {
 	TopP             *float64 `json:"topP,omitempty"`
 	MaxTokens        *int     `json:"maxTokens,omitempty"`
 	FrequencyPenalty *float64 `json:"frequencyPenalty,omitempty"`
-	// WebToolsEnabled is the global switch for web search and page fetch.
+	// WebToolsEnabled is the global consent switch for web search and page
+	// fetch. Turning it on starts new chats with web tools enabled; each chat
+	// still has its own toggle to turn them off.
 	WebToolsEnabled bool `json:"webToolsEnabled"`
 	// SearchProvider selects the web search backend: "parallel", "brave", or
 	// "ollama". Empty means "parallel".
@@ -47,8 +49,10 @@ type Config struct {
 // Default returns the configuration used on first launch.
 func Default() Config {
 	return Config{
-		BaseURL:         "https://api.openai.com/v1",
-		WebToolsEnabled: true,
+		BaseURL: "https://api.openai.com/v1",
+		// Web tools stay off until the user opts in, so no search query leaves
+		// the machine by default.
+		WebToolsEnabled: false,
 		SearchProvider:  "parallel",
 		Theme:           "system",
 	}

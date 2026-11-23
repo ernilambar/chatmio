@@ -19,10 +19,10 @@ func load(t *testing.T, body string) Config {
 	return cfg
 }
 
-func TestLoadEnablesWebToolsByDefault(t *testing.T) {
+func TestLoadDisablesWebToolsByDefault(t *testing.T) {
 	cfg := load(t, `{"baseUrl":"https://example.com"}`)
-	if !cfg.WebToolsEnabled {
-		t.Fatal("WebToolsEnabled = false, want the default true")
+	if cfg.WebToolsEnabled {
+		t.Fatal("WebToolsEnabled = true, want the default false")
 	}
 	if cfg.SearchProvider != "parallel" {
 		t.Fatalf("SearchProvider = %q, want parallel", cfg.SearchProvider)

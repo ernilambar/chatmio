@@ -8,8 +8,10 @@ Chatmio is a macOS desktop client for OpenAI-compatible chat APIs. The backend i
 Optional web tools: `pkg/webtools` exposes `web_search` / `web_fetch` backed by Parallel's
 hosted MCP server, the Brave Search API, or the Ollama web API. `searchProvider` in config selects
 the backend (default `parallel`) and `parallelApiKey` / `braveApiKey` / `ollamaApiKey` hold its key;
-`webToolsEnabled` is the global switch (on by default; each chat still has its own web tools
-toggle, so nothing is sent off the machine until a chat enables it). Parallel works without a key on
+`webToolsEnabled` is the global consent switch (off by default): turning it on starts new chats
+with web tools enabled, and each chat keeps its own toggle to turn them off. Nothing is sent to a
+search provider until it is on. Existing chats keep the value they were created with. Parallel
+works without a key on
 its free anonymous tier and its search takes `objective` + `search_queries`, so
 `Client.Definitions` returns provider-specific schemas; Brave and Ollama need a key before the tools
 are enabled. Parallel and

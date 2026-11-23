@@ -134,6 +134,8 @@
     streamReasoning={chat.streamReasoning}
     streamTools={chat.streamTools}
     webToolsAvailable={!!(
+      // Mirrors searchReady in app.go: a chat only offers web tools when the
+      // global switch is on and the selected provider can actually run.
       chat.config?.webToolsEnabled &&
       (chat.config?.searchProvider === 'ollama'
         ? chat.config?.ollamaApiKey

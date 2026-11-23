@@ -218,6 +218,21 @@ func (a *App) SearchThreads(query string) ([]db.SearchResult, error) {
 	return store.SearchThreads(query, 20)
 }
 
+// searchReady reports whether the configured provider can run web tools.
+// Parallel works without a key on its free tier; Brave and Ollama need theirs.
+// It mirrors the availability check in App.svelte so a chat never stores web
+// tools as on while no provider can serve them.
+func searchReady(cfg config.Config) bool {
+	switch webtools.NormalizeProvider(cfg.SearchProvider) {
+	case webtools.ProviderBrave:
+		return cfg.BraveAPIKey != ""
+	case webtools.ProviderOllama:
+		return cfg.OllamaAPIKey != ""
+	default:
+		return true
+	}
+}
+
 // CreateThread creates an empty chat thread and returns it.
 func (a *App) CreateThread() (db.Thread, error) {
 	store, err := a.diskStore()
@@ -229,8 +244,8 @@ func (a *App) CreateThread() (db.Thread, error) {
 		return db.Thread{}, err
 	}
 	now := time.Now().UnixMilli()
-	// Snapshot the generation defaults so later config edits do not change
-	// existing chats.
+	// Snapshot the generation defaults and the web tools default so later
+	// config edits do not change existing chats.
 	thread := db.Thread{
 		ID:               uuid.NewString(),
 		Title:            defaultThreadTitle,
@@ -239,6 +254,7 @@ func (a *App) CreateThread() (db.Thread, error) {
 		TopP:             cfg.TopP,
 		MaxTokens:        cfg.MaxTokens,
 		FrequencyPenalty: cfg.FrequencyPenalty,
+		WebTools:         cfg.WebToolsEnabled && searchReady(cfg),
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
@@ -267,6 +283,7 @@ func (a *App) CreateTemporaryThread() (db.Thread, error) {
 		TopP:             cfg.TopP,
 		MaxTokens:        cfg.MaxTokens,
 		FrequencyPenalty: cfg.FrequencyPenalty,
+		WebTools:         cfg.WebToolsEnabled && searchReady(cfg),
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}

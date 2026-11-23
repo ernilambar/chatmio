@@ -48,7 +48,8 @@
   let braveApiKey = $state('')
   let ollamaApiKey = $state('')
   let parallelApiKey = $state('')
-  let searchMode = $state<'parallel' | 'brave' | 'ollama' | 'disabled'>('parallel')
+  let webSearch = $state(false)
+  let searchProvider = $state<'parallel' | 'brave' | 'ollama'>('parallel')
   let themeMode = $state<ThemeMode>('system')
   let initialTheme = $state<ThemeMode>('system')
   let models = $state<string[]>([])
@@ -82,13 +83,11 @@
       braveApiKey = cfg.braveApiKey
       ollamaApiKey = cfg.ollamaApiKey
       parallelApiKey = cfg.parallelApiKey
-      searchMode = !cfg.webToolsEnabled
-        ? 'disabled'
-        : cfg.searchProvider === 'ollama'
-          ? 'ollama'
-          : cfg.searchProvider === 'brave'
-            ? 'brave'
-            : 'parallel'
+      webSearch = cfg.webToolsEnabled
+      searchProvider =
+        cfg.searchProvider === 'ollama' || cfg.searchProvider === 'brave'
+          ? cfg.searchProvider
+          : 'parallel'
       const savedTheme = cfg.theme === 'light' || cfg.theme === 'dark' ? cfg.theme : 'system'
       themeMode = savedTheme
       initialTheme = savedTheme
@@ -185,9 +184,8 @@
           braveApiKey,
           ollamaApiKey,
           parallelApiKey,
-          searchProvider:
-            searchMode === 'disabled' ? (cfg?.searchProvider ?? 'parallel') : searchMode,
-          webToolsEnabled: searchMode !== 'disabled',
+          searchProvider,
+          webToolsEnabled: webSearch,
           theme: themeMode
         })
       )
@@ -463,30 +461,50 @@
             </div>
           {:else}
             <div class="space-y-3">
+              <div class="flex items-center justify-between gap-3">
+                <span class="text-xs text-muted">Web search</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={webSearch}
+                  aria-label="Web search"
+                  onclick={() => (webSearch = !webSearch)}
+                  class="relative h-5 w-9 shrink-0 rounded-full transition-colors {webSearch
+                    ? 'bg-accent'
+                    : 'bg-line'}"
+                >
+                  <span
+                    class="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition-transform {webSearch
+                      ? 'translate-x-4'
+                      : 'translate-x-0'}"
+                  ></span>
+                </button>
+              </div>
+              <p class="text-[11px] text-muted">
+                Off by default. Turning it on starts new chats with web search on; each chat can
+                still turn it off. The chat model must support tool calling.
+              </p>
+
               <label class="block space-y-1">
                 <span class="text-xs text-muted">Search provider</span>
                 <select
-                  bind:value={searchMode}
+                  bind:value={searchProvider}
                   class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
                 >
-                  <option value="disabled">Disabled</option>
                   <option value="parallel">Parallel (no API key)</option>
                   <option value="brave">Brave Search</option>
                   <option value="ollama">Ollama</option>
                 </select>
-                <span class="text-[11px] text-muted">
-                  Parallel works without a key. Brave and Ollama need their own API key, or
-                  web search can be disabled everywhere.
-                </span>
               </label>
 
-              {#if searchMode === 'parallel'}
+              {#if searchProvider === 'parallel'}
                 <label class="block space-y-1">
                   <span class="text-xs text-muted">Parallel API key (optional)</span>
                   <input
                     bind:value={parallelApiKey}
                     type="password"
-                    class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+                    disabled={!webSearch}
+                    class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent disabled:opacity-60"
                     placeholder="Optional"
                   />
                   <span class="text-[11px] text-muted">
@@ -495,38 +513,41 @@
                     the limits and bills that Parallel account.
                   </span>
                 </label>
-              {:else if searchMode === 'brave'}
+              {:else if searchProvider === 'brave'}
                 <label class="block space-y-1">
                   <span class="text-xs text-muted">Brave Search API key</span>
                   <input
                     bind:value={braveApiKey}
                     type="password"
-                    class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+                    disabled={!webSearch}
+                    class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent disabled:opacity-60"
                     placeholder="Required"
                   />
                   <span class="text-[11px] text-muted">
-                    Enables the web search toggle in chats. Queries are sent to
-                    api.search.brave.com. The chat model must support tool calling.
+                    Queries are sent to api.search.brave.com. The chat model must support tool
+                    calling.
                   </span>
                 </label>
-              {:else if searchMode === 'ollama'}
+              {:else}
                 <label class="block space-y-1">
                   <span class="text-xs text-muted">Ollama API key</span>
                   <input
                     bind:value={ollamaApiKey}
                     type="password"
-                    class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+                    disabled={!webSearch}
+                    class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent disabled:opacity-60"
                     placeholder="Required"
                   />
                   <span class="text-[11px] text-muted">
-                    Enables the web search toggle in chats. Queries and fetched URLs are sent
-                    to ollama.com. The chat model must support tool calling.
+                    Queries and fetched URLs are sent to ollama.com. The chat model must support
+                    tool calling.
                   </span>
                 </label>
-              {:else}
+              {/if}
+
+              {#if !webSearch}
                 <p class="text-[11px] text-muted">
-                  Web search and page fetch are off for every chat. Your provider and key are
-                  kept for when you turn them back on.
+                  Web search is off. Saved keys are kept; turn web search on to edit them.
                 </p>
               {/if}
             </div>
