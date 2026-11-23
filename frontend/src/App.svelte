@@ -61,6 +61,8 @@
   })
 
   function handleKeydown(event: KeyboardEvent): void {
+    // Ignore auto-repeat so holding ⌘N does not create chats in bulk.
+    if (event.repeat) return
     const mod = event.metaKey || event.ctrlKey
     const key = event.key.toLowerCase()
 

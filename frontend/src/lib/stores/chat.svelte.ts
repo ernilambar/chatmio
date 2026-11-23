@@ -104,6 +104,9 @@ class ChatStore {
 
   private unsubscribers: Array<() => void> = []
   private failedSend = $state<{ content: string; files: File[] } | null>(null)
+  // creating serializes thread creation so a double click cannot insert two
+  // blank chats before the first one is active.
+  private creating = false
 
   get activeThread(): db.Thread | null {
     if (this.tempThread?.id === this.activeId) return this.tempThread
@@ -161,6 +164,20 @@ class ChatStore {
       await this.select(first.id)
     } else if (this.chatModelReady) {
       await this.createThread()
+    }
+    // Drop other blank threads left behind by duplicate "New chat" presses.
+    const stale = this.threads.filter((thread) => thread.id !== this.activeId)
+    const empties = await Promise.all(
+      stale.map(async (thread) => ((await GetMessages(thread.id)).length === 0 ? thread.id : null))
+    )
+    for (const id of empties) {
+      if (!id) continue
+      try {
+        await DeleteThread(id)
+      } catch {
+        continue
+      }
+      this.threads = this.threads.filter((thread) => thread.id !== id)
     }
     void this.loadModels()
   }
@@ -237,28 +254,43 @@ class ChatStore {
   }
 
   async createThread(): Promise<void> {
-    if (this.streaming || !this.chatModelReady) return
-    await this.dropTemporary()
-    const thread = await CreateThread()
-    this.threads = [thread, ...this.threads]
-    this.activeId = thread.id
-    this.messages = []
-    this.error = null
-    this.failedSend = null
+    if (this.streaming || !this.chatModelReady || this.creating) return
+    // Already on an untouched persisted chat: pressing New chat again is a
+    // no-op instead of inserting another blank thread.
+    if (!this.temporary && this.activeThread && this.messages.length === 0) return
+    this.creating = true
+    try {
+      await this.dropTemporary()
+      const thread = await CreateThread()
+      this.threads = [thread, ...this.threads]
+      this.activeId = thread.id
+      this.messages = []
+      this.error = null
+      this.failedSend = null
+    } finally {
+      this.creating = false
+    }
   }
 
   // createTemporaryThread starts a chat whose messages are never written to
   // disk. Switching away from it discards it.
   async createTemporaryThread(): Promise<void> {
-    if (this.streaming || !this.chatModelReady) return
-    await this.dropTemporary()
-    const thread = await CreateTemporaryThread()
-    this.tempThread = thread
-    this.activeId = thread.id
-    this.messages = []
-    this.error = null
-    this.failedSend = null
-    this.resetStream()
+    if (this.streaming || !this.chatModelReady || this.creating) return
+    // Already on an untouched temporary chat: pressing it again is a no-op.
+    if (this.temporary && this.messages.length === 0) return
+    this.creating = true
+    try {
+      await this.dropTemporary()
+      const thread = await CreateTemporaryThread()
+      this.tempThread = thread
+      this.activeId = thread.id
+      this.messages = []
+      this.error = null
+      this.failedSend = null
+      this.resetStream()
+    } finally {
+      this.creating = false
+    }
   }
 
   async select(id: string): Promise<void> {
