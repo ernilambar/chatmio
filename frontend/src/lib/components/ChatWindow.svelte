@@ -15,7 +15,6 @@
     Send,
     SlidersHorizontal,
     Square,
-    Trash2,
     Volume2,
     VolumeX,
     X
@@ -46,8 +45,6 @@
     canRetry,
     onregenerate,
     onedit,
-    onrename,
-    ondelete,
     onmodelchange,
     oncancel,
     onopensettings,
@@ -74,8 +71,6 @@
     canRetry: boolean
     onregenerate: () => void
     onedit: (messageId: string, content: string) => void
-    onrename: (threadId: string, title: string) => Promise<void> | void
-    ondelete: (threadId: string) => Promise<void> | void
     onmodelchange: (model: string) => Promise<void> | void
     oncancel: () => void
     onopensettings: () => void
@@ -124,10 +119,6 @@
   let fileInput: HTMLInputElement | undefined = $state()
   let inputEl: HTMLTextAreaElement | undefined = $state()
   let scroller: HTMLDivElement | undefined = $state()
-  let renaming = $state(false)
-  let renameInput: HTMLInputElement | undefined = $state()
-  let titleDraft = $state('')
-  let confirmingDelete = $state(false)
   let copiedId = $state<string | null>(null)
   let copyTimer: ReturnType<typeof setTimeout> | undefined
   let speakingId = $state<string | null>(null)
@@ -177,8 +168,6 @@
       draft = ''
       files = []
       suggestions = pickSuggestions(3)
-      renaming = false
-      confirmingDelete = false
       editing = null
       atBottom = true
       stopSpeaking()
@@ -192,10 +181,6 @@
   })
 
   onDestroy(stopSpeaking)
-
-  $effect(() => {
-    if (renaming && renameInput) renameInput.focus()
-  })
 
   $effect(() => {
     if (editing && inputEl) inputEl.focus()
@@ -298,37 +283,6 @@
     inputEl?.focus()
   }
 
-  function startRename(): void {
-    if (!thread) return
-    titleDraft = thread.title
-    renaming = true
-  }
-
-  async function commitRename(): Promise<void> {
-    if (!renaming || !thread) return
-    renaming = false
-    const title = titleDraft.trim()
-    if (title && title !== thread.title) {
-      await onrename(thread.id, title)
-    }
-  }
-
-  function handleRenameKeydown(event: KeyboardEvent): void {
-    if (event.key === 'Enter') {
-      event.preventDefault()
-      void commitRename()
-    } else if (event.key === 'Escape') {
-      event.preventDefault()
-      renaming = false
-    }
-  }
-
-  function removeThread(): void {
-    if (!thread) return
-    confirmingDelete = false
-    void ondelete(thread.id)
-  }
-
   async function copyMessage(message: db.Message): Promise<void> {
     const text = messageParts(message).content
     if (!text) return
@@ -395,19 +349,9 @@
       </button>
     {/if}
     <div class="min-w-0 flex-1">
-      {#if renaming}
-        <input
-          bind:this={renameInput}
-          bind:value={titleDraft}
-          onkeydown={handleRenameKeydown}
-          onblur={() => void commitRename()}
-          class="w-full rounded-md border border-line bg-panel px-2 py-1 text-sm outline-none focus:border-accent"
-        />
-      {:else}
-        <div class="flex items-center gap-1.5">
-          <h1 class="truncate text-sm font-medium">{thread?.title ?? import.meta.env.VITE_APP_NAME}</h1>
-        </div>
-      {/if}
+      <div class="flex items-center gap-1.5">
+        <h1 class="truncate text-sm font-medium">{thread?.title ?? import.meta.env.VITE_APP_NAME}</h1>
+      </div>
 
       <div class="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted">
         <span>{messages.length} {messages.length === 1 ? 'message' : 'messages'}</span>
@@ -452,46 +396,13 @@
     </div>
 
     {#if thread}
-      <div class="flex items-center gap-1">
-        <button
-          class="rounded-md p-1.5 text-muted hover:bg-panel hover:text-fg"
-          title="Chat settings"
-          onclick={onopensettings}
-        >
-          <SlidersHorizontal size={15} />
-        </button>
-        <button
-          class="rounded-md p-1.5 text-muted hover:bg-panel hover:text-fg"
-          title="Rename chat"
-          onclick={startRename}
-        >
-          <Pencil size={15} />
-        </button>
-        {#if confirmingDelete}
-          <button
-            class="rounded-md bg-red-500/10 p-1.5 text-red-500 hover:bg-red-500/20"
-            title="Delete chat"
-            onclick={removeThread}
-          >
-            <Trash2 size={15} />
-          </button>
-          <button
-            class="rounded-md p-1.5 text-muted hover:bg-panel hover:text-fg"
-            title="Cancel delete"
-            onclick={() => (confirmingDelete = false)}
-          >
-            <X size={15} />
-          </button>
-        {:else}
-          <button
-            class="rounded-md p-1.5 text-muted hover:bg-panel hover:text-red-500"
-            title="Delete chat"
-            onclick={() => (confirmingDelete = true)}
-          >
-            <Trash2 size={15} />
-          </button>
-        {/if}
-      </div>
+      <button
+        class="rounded-md p-1.5 text-muted hover:bg-panel hover:text-fg"
+        title="Chat settings"
+        onclick={onopensettings}
+      >
+        <SlidersHorizontal size={15} />
+      </button>
     {/if}
   </header>
 

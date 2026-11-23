@@ -127,6 +127,8 @@
       onsettings={() => (settingsOpen = true)}
       onsearch={() => (searchOpen = true)}
       onhide={toggleSidebar}
+      ondelete={(id) => chat.deleteThread(id)}
+      onrename={(id, title) => chat.renameThread(id, title)}
     />
   {/if}
   <ChatWindow
@@ -160,8 +162,6 @@
     canRetry={chat.canRetry}
     onregenerate={() => chat.regenerate()}
     onedit={(id, content) => chat.edit(id, content)}
-    onrename={(id, title) => chat.renameThread(id, title)}
-    ondelete={(id) => chat.deleteThread(id)}
     onmodelchange={(model) => chat.setThreadModel(model)}
     oncancel={() => void chat.cancel()}
     onopensettings={() => (chatSettingsOpen = true)}
