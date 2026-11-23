@@ -119,6 +119,8 @@
       activeId={chat.activeId}
       temporaryActive={chat.temporary}
       canCreate={chat.chatModelReady}
+      newChatOpen={chat.newChatOpen}
+      newTemporaryOpen={chat.newTemporaryOpen}
       oncreate={() => chat.createThread()}
       oncreatetemporary={() => chat.createTemporaryThread()}
       onselect={(id) => chat.select(id)}

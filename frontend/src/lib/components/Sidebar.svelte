@@ -7,6 +7,8 @@
     activeId,
     temporaryActive,
     canCreate,
+    newChatOpen,
+    newTemporaryOpen,
     oncreate,
     oncreatetemporary,
     onselect,
@@ -18,6 +20,8 @@
     activeId: string | null
     temporaryActive: boolean
     canCreate: boolean
+    newChatOpen: boolean
+    newTemporaryOpen: boolean
     oncreate: () => void
     oncreatetemporary: () => void
     onselect: (id: string) => void
@@ -49,17 +53,21 @@
         class="rounded-md p-1.5 transition-colors disabled:opacity-40 disabled:pointer-events-none {temporaryActive
           ? 'bg-surface text-fg'
           : 'text-muted hover:bg-surface hover:text-fg'}"
-        title={canCreate ? 'Temporary chat (⌘⇧N, not saved)' : 'Set a chat model in settings'}
+        title={!canCreate
+          ? 'Set a chat model in settings'
+          : newTemporaryOpen
+            ? 'Temporary chat already open'
+            : 'Temporary chat (⌘⇧N, not saved)'}
         aria-pressed={temporaryActive}
-        disabled={!canCreate}
+        disabled={!canCreate || newTemporaryOpen}
         onclick={oncreatetemporary}
       >
         <Ghost size={16} />
       </button>
       <button
         class="rounded-md p-1.5 text-muted transition-colors hover:bg-surface hover:text-fg disabled:opacity-40 disabled:pointer-events-none"
-        title={canCreate ? 'New chat (⌘N)' : 'Set a chat model in settings'}
-        disabled={!canCreate}
+        title={!canCreate ? 'Set a chat model in settings' : newChatOpen ? 'New chat already open' : 'New chat (⌘N)'}
+        disabled={!canCreate || newChatOpen}
         onclick={oncreate}
       >
         <Plus size={16} />

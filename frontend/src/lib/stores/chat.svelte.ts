@@ -118,6 +118,18 @@ class ChatStore {
     return this.tempThread !== null && this.tempThread.id === this.activeId
   }
 
+  // newChatOpen is true while the active chat is an untouched persisted chat;
+  // creating another one would only add a blank thread.
+  get newChatOpen(): boolean {
+    return !this.temporary && this.activeThread !== null && this.messages.length === 0
+  }
+
+  // newTemporaryOpen is true while the active chat is an untouched temporary
+  // chat, which a second temporary chat would replace with no benefit.
+  get newTemporaryOpen(): boolean {
+    return this.temporary && this.messages.length === 0
+  }
+
   get canRetry(): boolean {
     if (this.streaming) return false
     const last = this.messages[this.messages.length - 1]
@@ -257,7 +269,7 @@ class ChatStore {
     if (this.streaming || !this.chatModelReady || this.creating) return
     // Already on an untouched persisted chat: pressing New chat again is a
     // no-op instead of inserting another blank thread.
-    if (!this.temporary && this.activeThread && this.messages.length === 0) return
+    if (this.newChatOpen) return
     this.creating = true
     try {
       await this.dropTemporary()
@@ -277,7 +289,7 @@ class ChatStore {
   async createTemporaryThread(): Promise<void> {
     if (this.streaming || !this.chatModelReady || this.creating) return
     // Already on an untouched temporary chat: pressing it again is a no-op.
-    if (this.temporary && this.messages.length === 0) return
+    if (this.newTemporaryOpen) return
     this.creating = true
     try {
       await this.dropTemporary()
