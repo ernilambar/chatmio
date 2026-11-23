@@ -676,12 +676,18 @@ func (a *App) streamReply(thread db.Thread, cfg config.Config, model string, sto
 
 	var web *webtools.Client
 	if cfg.WebToolsEnabled && thread.WebTools {
-		key := cfg.BraveAPIKey
-		if cfg.SearchProvider == webtools.ProviderOllama {
-			key = cfg.OllamaAPIKey
-		}
-		if key != "" {
-			web = webtools.New(cfg.SearchProvider, key)
+		provider := webtools.NormalizeProvider(cfg.SearchProvider)
+		if provider == webtools.ProviderParallel {
+			// Parallel runs without a key on its free anonymous tier.
+			web = webtools.New(provider, cfg.ParallelAPIKey)
+		} else {
+			key := cfg.BraveAPIKey
+			if provider == webtools.ProviderOllama {
+				key = cfg.OllamaAPIKey
+			}
+			if key != "" {
+				web = webtools.New(provider, key)
+			}
 		}
 	}
 
@@ -693,7 +699,7 @@ func (a *App) streamReply(thread db.Thread, cfg config.Config, model string, sto
 	for round := 0; ; round++ {
 		var tools []ai.Tool
 		if web != nil && round < maxToolRounds {
-			tools = webtools.Definitions()
+			tools = web.Definitions()
 		}
 		if round > 0 && reply.Len() > 0 && !strings.HasSuffix(reply.String(), "\n") {
 			// Keep text written before and after a tool call as separate paragraphs.

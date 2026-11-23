@@ -47,7 +47,8 @@
   let frequencyPenalty = $state<number | null>(null)
   let braveApiKey = $state('')
   let ollamaApiKey = $state('')
-  let searchMode = $state<'brave' | 'ollama' | 'disabled'>('brave')
+  let parallelApiKey = $state('')
+  let searchMode = $state<'parallel' | 'brave' | 'ollama' | 'disabled'>('parallel')
   let themeMode = $state<ThemeMode>('system')
   let initialTheme = $state<ThemeMode>('system')
   let models = $state<string[]>([])
@@ -80,11 +81,14 @@
       frequencyPenalty = cfg.frequencyPenalty ?? null
       braveApiKey = cfg.braveApiKey
       ollamaApiKey = cfg.ollamaApiKey
+      parallelApiKey = cfg.parallelApiKey
       searchMode = !cfg.webToolsEnabled
         ? 'disabled'
         : cfg.searchProvider === 'ollama'
           ? 'ollama'
-          : 'brave'
+          : cfg.searchProvider === 'brave'
+            ? 'brave'
+            : 'parallel'
       const savedTheme = cfg.theme === 'light' || cfg.theme === 'dark' ? cfg.theme : 'system'
       themeMode = savedTheme
       initialTheme = savedTheme
@@ -180,7 +184,9 @@
           frequencyPenalty: frequencyPenalty ?? undefined,
           braveApiKey,
           ollamaApiKey,
-          searchProvider: searchMode === 'ollama' ? 'ollama' : 'brave',
+          parallelApiKey,
+          searchProvider:
+            searchMode === 'disabled' ? (cfg?.searchProvider ?? 'parallel') : searchMode,
           webToolsEnabled: searchMode !== 'disabled',
           theme: themeMode
         })
@@ -464,15 +470,32 @@
                   class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
                 >
                   <option value="disabled">Disabled</option>
+                  <option value="parallel">Parallel (no API key)</option>
                   <option value="brave">Brave Search</option>
                   <option value="ollama">Ollama</option>
                 </select>
                 <span class="text-[11px] text-muted">
-                  Choose a provider and enter its API key, or disable web search everywhere.
+                  Parallel works without a key. Brave and Ollama need their own API key, or
+                  web search can be disabled everywhere.
                 </span>
               </label>
 
-              {#if searchMode === 'brave'}
+              {#if searchMode === 'parallel'}
+                <label class="block space-y-1">
+                  <span class="text-xs text-muted">Parallel API key (optional)</span>
+                  <input
+                    bind:value={parallelApiKey}
+                    type="password"
+                    class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+                    placeholder="Optional"
+                  />
+                  <span class="text-[11px] text-muted">
+                    Without a key, search and fetch use Parallel's free tier at lower rate
+                    limits. Queries and fetched URLs are sent to mcp.parallel.ai. A key raises
+                    the limits and bills that Parallel account.
+                  </span>
+                </label>
+              {:else if searchMode === 'brave'}
                 <label class="block space-y-1">
                   <span class="text-xs text-muted">Brave Search API key</span>
                   <input

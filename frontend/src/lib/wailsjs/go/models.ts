@@ -13,6 +13,7 @@ export namespace config {
 	    frequencyPenalty?: number;
 	    webToolsEnabled: boolean;
 	    searchProvider: string;
+	    parallelApiKey: string;
 	    braveApiKey: string;
 	    ollamaApiKey: string;
 	    theme: string;
@@ -35,6 +36,7 @@ export namespace config {
 	        this.frequencyPenalty = source["frequencyPenalty"];
 	        this.webToolsEnabled = source["webToolsEnabled"];
 	        this.searchProvider = source["searchProvider"];
+	        this.parallelApiKey = source["parallelApiKey"];
 	        this.braveApiKey = source["braveApiKey"];
 	        this.ollamaApiKey = source["ollamaApiKey"];
 	        this.theme = source["theme"];

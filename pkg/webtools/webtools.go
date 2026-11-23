@@ -1,6 +1,7 @@
 // Package webtools exposes web search and page fetch tools. Search runs on the
-// Brave Search API or the Ollama web API; Brave fetches pages locally while
-// Ollama fetches them through its own API.
+// Parallel MCP server, the Brave Search API, or the Ollama web API; Brave
+// fetches pages locally while Parallel and Ollama fetch them through their own
+// APIs.
 package webtools
 
 import (
@@ -22,12 +23,15 @@ import (
 )
 
 const (
-	// ProviderBrave and ProviderOllama are the supported search providers.
-	ProviderBrave  = "brave"
-	ProviderOllama = "ollama"
+	// ProviderParallel, ProviderBrave, and ProviderOllama are the supported
+	// search providers.
+	ProviderParallel = "parallel"
+	ProviderBrave    = "brave"
+	ProviderOllama   = "ollama"
 
-	BraveBaseURL  = "https://api.search.brave.com/res/v1"
-	OllamaBaseURL = "https://ollama.com/api"
+	ParallelBaseURL = "https://mcp.parallel.ai/mcp"
+	BraveBaseURL    = "https://api.search.brave.com/res/v1"
+	OllamaBaseURL   = "https://ollama.com/api"
 
 	SearchTool = "web_search"
 	FetchTool  = "web_fetch"
@@ -40,35 +44,50 @@ const (
 	userAgent        = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
 )
 
-// Definitions returns the tools offered to the model.
+// Definitions returns the tools offered to the model. Brave and Ollama take a
+// single search query; use Client.Definitions for the provider's own shape.
 func Definitions() []ai.Tool {
-	return []ai.Tool{
-		{
-			Type: "function",
-			Function: ai.ToolFunction{
-				Name:        SearchTool,
-				Description: "Search the web for current information. Returns titles, URLs and page excerpts.",
-				Parameters: map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"query": map[string]any{"type": "string", "description": "Search query"},
-					},
-					"required": []string{"query"},
+	return []ai.Tool{searchDefinition(), fetchDefinition()}
+}
+
+// Definitions returns the tool definitions for the client's provider. Parallel
+// takes an objective plus keyword queries, so its search schema differs.
+func (c *Client) Definitions() []ai.Tool {
+	if c.Provider == ProviderParallel {
+		return []ai.Tool{parallelSearchDefinition(), fetchDefinition()}
+	}
+	return Definitions()
+}
+
+func searchDefinition() ai.Tool {
+	return ai.Tool{
+		Type: "function",
+		Function: ai.ToolFunction{
+			Name:        SearchTool,
+			Description: "Search the web for current information. Returns titles, URLs and page excerpts.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query": map[string]any{"type": "string", "description": "Search query"},
 				},
+				"required": []string{"query"},
 			},
 		},
-		{
-			Type: "function",
-			Function: ai.ToolFunction{
-				Name:        FetchTool,
-				Description: "Fetch a web page by URL and return its readable text.",
-				Parameters: map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"url": map[string]any{"type": "string", "description": "Absolute http(s) URL"},
-					},
-					"required": []string{"url"},
+	}
+}
+
+func fetchDefinition() ai.Tool {
+	return ai.Tool{
+		Type: "function",
+		Function: ai.ToolFunction{
+			Name:        FetchTool,
+			Description: "Fetch a web page by URL and return its readable text.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"url": map[string]any{"type": "string", "description": "Absolute http(s) URL"},
 				},
+				"required": []string{"url"},
 			},
 		},
 	}
@@ -85,15 +104,27 @@ type Client struct {
 	allowPrivate bool
 }
 
-// New returns a client for provider. Any value other than ProviderOllama uses
-// the Brave Search API.
-func New(provider, apiKey string) *Client {
-	if provider != ProviderOllama {
-		provider = ProviderBrave
+// NormalizeProvider maps a stored search provider name to a supported one.
+// Unknown or empty values select Parallel, which works without a key.
+func NormalizeProvider(provider string) string {
+	switch provider {
+	case ProviderBrave, ProviderOllama:
+		return provider
+	default:
+		return ProviderParallel
 	}
-	base := BraveBaseURL
-	if provider == ProviderOllama {
+}
+
+// New returns a client for provider. Parallel works without an API key on its
+// free anonymous tier.
+func New(provider, apiKey string) *Client {
+	provider = NormalizeProvider(provider)
+	base := ParallelBaseURL
+	switch provider {
+	case ProviderOllama:
 		base = OllamaBaseURL
+	case ProviderBrave:
+		base = BraveBaseURL
 	}
 	c := &Client{Provider: provider, BaseURL: base, APIKey: apiKey}
 	c.HTTP = &http.Client{
@@ -111,15 +142,20 @@ func New(provider, apiKey string) *Client {
 	return c
 }
 
-// Input returns the query or URL from a call's raw JSON arguments, for display.
+// Input returns the query, objective, or URL from a call's raw JSON arguments,
+// for display.
 func Input(arguments string) string {
 	var args struct {
-		Query string `json:"query"`
-		URL   string `json:"url"`
+		Query     string `json:"query"`
+		Objective string `json:"objective"`
+		URL       string `json:"url"`
 	}
 	_ = json.Unmarshal([]byte(arguments), &args)
 	if args.Query != "" {
 		return strings.TrimSpace(args.Query)
+	}
+	if args.Objective != "" {
+		return strings.TrimSpace(args.Objective)
 	}
 	return strings.TrimSpace(args.URL)
 }
@@ -127,9 +163,12 @@ func Input(arguments string) string {
 // Run executes one tool call and returns the text sent back to the model and a
 // short summary for the UI.
 func (c *Client) Run(ctx context.Context, name, arguments string) (result, summary string, err error) {
-	input := Input(arguments)
 	switch name {
 	case SearchTool:
+		if c.Provider == ProviderParallel {
+			return c.searchParallel(ctx, arguments)
+		}
+		input := Input(arguments)
 		if input == "" {
 			return "", "", errors.New("query is required")
 		}
@@ -138,13 +177,18 @@ func (c *Client) Run(ctx context.Context, name, arguments string) (result, summa
 		}
 		return c.searchBrave(ctx, input)
 	case FetchTool:
+		input := Input(arguments)
 		if input == "" {
 			return "", "", errors.New("url is required")
 		}
-		if c.Provider == ProviderOllama {
+		switch c.Provider {
+		case ProviderParallel:
+			return c.fetchParallel(ctx, input)
+		case ProviderOllama:
 			return c.fetchOllama(ctx, input)
+		default:
+			return c.fetchBrave(ctx, input)
 		}
-		return c.fetchBrave(ctx, input)
 	default:
 		return "", "", fmt.Errorf("unknown tool %q", name)
 	}
