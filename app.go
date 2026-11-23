@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"log"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -466,12 +469,33 @@ func (a *App) ListModels(baseURL, apiKey string) (ModelList, error) {
 	}
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {
-		if urlErr.Timeout() {
-			return ModelList{}, errors.New("provider did not respond in time")
-		}
-		return ModelList{}, fmt.Errorf("cannot reach the provider: %v", urlErr.Err)
+		return ModelList{}, networkError(urlErr)
 	}
 	return ModelList{}, err
+}
+
+// networkError turns a failed request into a message that names the host and
+// the likely fix, instead of the raw dial error.
+func networkError(err *url.Error) error {
+	host := err.URL
+	if u, parseErr := url.Parse(err.URL); parseErr == nil && u.Host != "" {
+		host = u.Host
+	}
+	var dnsErr *net.DNSError
+	var certErr *tls.CertificateVerificationError
+	var recordErr tls.RecordHeaderError
+	switch {
+	case err.Timeout():
+		return errors.New("The provider did not respond in time.")
+	case errors.As(err, &dnsErr):
+		return fmt.Errorf("Can't find %s. Check the base URL.", host)
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return fmt.Errorf("%s refused the connection. Is the server running?", host)
+	case errors.As(err, &certErr), errors.As(err, &recordErr):
+		return fmt.Errorf("Secure connection to %s failed.", host)
+	default:
+		return fmt.Errorf("Can't reach %s. Check the base URL and your network.", host)
+	}
 }
 
 // TestConnection verifies the provider settings the user is editing, before

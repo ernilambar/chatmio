@@ -145,9 +145,19 @@ func TestListModelsClassifiesFailures(t *testing.T) {
 	}
 
 	server.Close()
+	host := strings.TrimPrefix(server.URL, "http://")
 	_, err = app.ListModels(server.URL, "key")
-	if err == nil || !strings.HasPrefix(err.Error(), "cannot reach the provider") {
-		t.Fatalf("err = %v, want unreachable provider", err)
+	if err == nil || err.Error() != host+" refused the connection. Is the server running?" {
+		t.Fatalf("err = %v, want refused connection", err)
+	}
+
+	// The default client does not trust the test server's certificate.
+	tlsServer := httptest.NewTLSServer(http.NotFoundHandler())
+	defer tlsServer.Close()
+	tlsHost := strings.TrimPrefix(tlsServer.URL, "https://")
+	_, err = app.ListModels(tlsServer.URL, "key")
+	if err == nil || err.Error() != "Secure connection to "+tlsHost+" failed." {
+		t.Fatalf("err = %v, want TLS failure", err)
 	}
 }
 
