@@ -309,3 +309,12 @@ func TestCreateThreadKeepsExistingThreadsUnchanged(t *testing.T) {
 		}
 	}
 }
+
+func TestSaveConfigRejectsNonHTTPBaseURL(t *testing.T) {
+	app := &App{}
+	for _, raw := range []string{"file:///etc/passwd", "ftp://example.com", "example.com/v1", "http://"} {
+		if err := app.SaveConfig(config.Config{BaseURL: raw}); err == nil {
+			t.Errorf("SaveConfig(%q): want error", raw)
+		}
+	}
+}

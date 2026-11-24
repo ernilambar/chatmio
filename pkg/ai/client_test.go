@@ -210,3 +210,69 @@ func TestStreamChatSendsCustomHeaders(t *testing.T) {
 		t.Fatalf("StreamChat: %v", err)
 	}
 }
+
+func sseServer(t *testing.T, body string) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, body)
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func TestStreamChatRejectsTruncatedStream(t *testing.T) {
+	for name, body := range map[string]string{
+		"partial": "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
+		"empty":   "",
+		"no data": "<html>proxy error</html>\n",
+	} {
+		server := sseServer(t, body)
+		_, err := New(server.URL, "", nil).StreamChat(context.Background(), ChatOptions{Model: "m"}, func(Delta) {})
+		if !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Errorf("%s: err = %v, want io.ErrUnexpectedEOF", name, err)
+		}
+	}
+}
+
+func TestStreamChatAcceptsFinishReasonWithoutDone(t *testing.T) {
+	server := sseServer(t, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n")
+	var content strings.Builder
+	_, err := New(server.URL, "", nil).StreamChat(context.Background(), ChatOptions{Model: "m"}, func(d Delta) {
+		content.WriteString(d.Content)
+	})
+	if err != nil || content.String() != "ok" {
+		t.Fatalf("content = %q, err = %v; want ok, nil", content.String(), err)
+	}
+}
+
+func TestStreamChatRejectsOutOfRangeToolIndex(t *testing.T) {
+	for _, index := range []int{-1, MaxToolCalls, 100000} {
+		server := sseServer(t, fmt.Sprintf(
+			"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":%d,\"id\":\"a\",\"function\":{\"name\":\"x\"}}]}}]}\n\ndata: [DONE]\n\n", index))
+		reply, err := New(server.URL, "", nil).StreamChat(context.Background(), ChatOptions{Model: "m"}, func(Delta) {})
+		if err == nil || len(reply.ToolCalls) != 0 {
+			t.Errorf("index %d: calls = %d, err = %v; want an error and no calls", index, len(reply.ToolCalls), err)
+		}
+	}
+}
+
+func TestStreamChatRejectsCrossOriginRedirect(t *testing.T) {
+	replayed := false
+	other := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		replayed = true
+	}))
+	defer other.Close()
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	defer provider.Close()
+
+	_, err := New(provider.URL, "key", nil).StreamChat(context.Background(), ChatOptions{Model: "m"}, func(Delta) {})
+	if err == nil || !strings.Contains(err.Error(), "refusing redirect") {
+		t.Fatalf("err = %v, want redirect refusal", err)
+	}
+	if replayed {
+		t.Fatal("prompt body was replayed to another origin")
+	}
+}
