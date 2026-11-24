@@ -156,6 +156,7 @@ func Open(path string) (*Store, error) {
 	return open("file:" + path +
 		"?_pragma=foreign_keys(1)" +
 		"&_pragma=journal_mode(WAL)" +
+		"&_pragma=secure_delete(1)" +
 		"&_pragma=busy_timeout(5000)")
 }
 
@@ -460,7 +461,15 @@ func (s *Store) DeleteThread(id string) error {
 	if err != nil {
 		return fmt.Errorf("db: delete thread: %w", err)
 	}
+	s.checkpoint()
 	return nil
+}
+
+// checkpoint folds the WAL into the database and truncates it, so deleted
+// content does not linger in old WAL frames. secure_delete has already zeroed
+// the freed pages. Best-effort: the delete itself has committed.
+func (s *Store) checkpoint() {
+	_, _ = s.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
 }
 
 // DeleteEmptyThreads removes every thread except keepID that has no messages.
@@ -531,28 +540,49 @@ func (s *Store) AddMessage(m Message) error {
 	return nil
 }
 
-// UpdateMessageContent replaces the text of one message.
-func (s *Store) UpdateMessageContent(id, content string) error {
-	_, err := s.db.Exec(`UPDATE messages SET content = ? WHERE id = ?`, content, id)
+// deleteAfterSQL removes the messages that follow one message, in the same
+// (created_at, rowid) order ListMessages displays them.
+const deleteAfterSQL = `
+	DELETE FROM messages
+	WHERE thread_id = ?
+	  AND (created_at, rowid) > (
+		SELECT created_at, rowid FROM messages WHERE id = ? AND thread_id = ?
+	  )`
+
+// EditMessage replaces the text of a user message and removes every message
+// after it, in one transaction so a failure leaves the thread unchanged.
+func (s *Store) EditMessage(threadID, messageID, content string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("db: begin edit message: %w", err)
+	}
+	defer tx.Rollback()
+
+	result, err := tx.Exec(`UPDATE messages SET content = ? WHERE id = ? AND thread_id = ? AND role = 'user'`,
+		content, messageID, threadID)
 	if err != nil {
 		return fmt.Errorf("db: update message: %w", err)
 	}
+	if n, err := result.RowsAffected(); err != nil || n != 1 {
+		return errors.New("db: user message not found")
+	}
+	if _, err := tx.Exec(deleteAfterSQL, threadID, messageID, threadID); err != nil {
+		return fmt.Errorf("db: delete following messages: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("db: commit edit message: %w", err)
+	}
+	s.checkpoint()
 	return nil
 }
 
 // DeleteMessagesAfter removes every message that follows messageID in the same
 // thread. Attachments are removed by the foreign-key cascade.
 func (s *Store) DeleteMessagesAfter(threadID, messageID string) error {
-	_, err := s.db.Exec(`
-		DELETE FROM messages
-		WHERE thread_id = ?
-		  AND rowid > (
-			SELECT rowid FROM messages WHERE id = ? AND thread_id = ?
-		  )`,
-		threadID, messageID, threadID)
-	if err != nil {
+	if _, err := s.db.Exec(deleteAfterSQL, threadID, messageID, threadID); err != nil {
 		return fmt.Errorf("db: delete following messages: %w", err)
 	}
+	s.checkpoint()
 	return nil
 }
 

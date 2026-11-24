@@ -1,6 +1,8 @@
 package db
 
 import (
+	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -65,7 +67,7 @@ func TestDeleteMessagesAfterRemovesFollowingMessagesAndAttachments(t *testing.T)
 	}
 }
 
-func TestUpdateMessageContent(t *testing.T) {
+func TestEditMessageUpdatesAndTruncates(t *testing.T) {
 	store := openTestStore(t)
 
 	if err := store.CreateThread(Thread{ID: "t1", Title: "Chat", CreatedAt: 1, UpdatedAt: 1}); err != nil {
@@ -77,8 +79,20 @@ func TestUpdateMessageContent(t *testing.T) {
 		t.Fatalf("AddMessage: %v", err)
 	}
 
-	if err := store.UpdateMessageContent("m1", "after"); err != nil {
-		t.Fatalf("UpdateMessageContent: %v", err)
+	if err := store.AddMessage(Message{
+		ID: "m2", ThreadID: "t1", Role: "assistant", Content: "reply", CreatedAt: 3,
+	}); err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+
+	if err := store.EditMessage("t1", "m2", "x"); err == nil {
+		t.Fatal("EditMessage on an assistant message: want error")
+	}
+	if err := store.EditMessage("other", "m1", "x"); err == nil {
+		t.Fatal("EditMessage with the wrong thread: want error")
+	}
+	if err := store.EditMessage("t1", "m1", "after"); err != nil {
+		t.Fatalf("EditMessage: %v", err)
 	}
 
 	messages, err := store.ListMessages("t1")
@@ -338,5 +352,69 @@ func TestDeleteEmptyThreadsKeepsActiveAndNonEmpty(t *testing.T) {
 	}
 	if !ids["active"] || !ids["used"] || ids["empty"] || len(ids) != 2 {
 		t.Fatalf("threads = %v, want active and used", ids)
+	}
+}
+
+func TestDeleteMessagesAfterFollowsDisplayOrder(t *testing.T) {
+	store := openTestStore(t)
+	if err := store.CreateThread(Thread{ID: "t1", CreatedAt: 1, UpdatedAt: 1}); err != nil {
+		t.Fatalf("CreateThread: %v", err)
+	}
+	// "early" is inserted last but displays first, as after a clock change.
+	for _, m := range []Message{
+		{ID: "target", ThreadID: "t1", Role: "user", Content: "target", CreatedAt: 20},
+		{ID: "late", ThreadID: "t1", Role: "assistant", Content: "late", CreatedAt: 30},
+		{ID: "early", ThreadID: "t1", Role: "assistant", Content: "early", CreatedAt: 10},
+	} {
+		if err := store.AddMessage(m); err != nil {
+			t.Fatalf("AddMessage(%s): %v", m.ID, err)
+		}
+	}
+	if err := store.DeleteMessagesAfter("t1", "target"); err != nil {
+		t.Fatalf("DeleteMessagesAfter: %v", err)
+	}
+	messages, err := store.ListMessages("t1")
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(messages) != 2 || messages[0].ID != "early" || messages[1].ID != "target" {
+		t.Fatalf("messages = %+v, want early then target", messages)
+	}
+}
+
+func TestDeleteThreadLeavesNoPlaintextOnDisk(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "chats.db")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	const secret = "TOP_SECRET_DELETED_CONTENT"
+	if err := store.CreateThread(Thread{ID: "t1", CreatedAt: 1, UpdatedAt: 1}); err != nil {
+		t.Fatalf("CreateThread: %v", err)
+	}
+	if err := store.AddMessage(Message{
+		ID: "m1", ThreadID: "t1", Role: "user", Content: secret, CreatedAt: 2,
+		Attachments: []Attachment{{Name: "a.txt", MimeType: "text/plain", Data: []byte(strings.Repeat(secret, 2000)), CreatedAt: 2}},
+	}); err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+	if err := store.DeleteThread("t1"); err != nil {
+		t.Fatalf("DeleteThread: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	for _, file := range []string{path, path + "-wal"} {
+		data, err := os.ReadFile(file)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			t.Fatalf("ReadFile(%s): %v", file, err)
+		}
+		if bytes.Contains(data, []byte(secret)) {
+			t.Fatalf("%s still contains deleted content", filepath.Base(file))
+		}
 	}
 }

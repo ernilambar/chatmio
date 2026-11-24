@@ -696,13 +696,8 @@ func (a *App) EditMessage(threadID, messageID, content string) error {
 		return errors.New("message is empty")
 	}
 
-	if err := store.UpdateMessageContent(messageID, content); err != nil {
+	if err := store.EditMessage(threadID, messageID, content); err != nil {
 		return err
-	}
-	if target < len(messages)-1 {
-		if err := store.DeleteMessagesAfter(threadID, messageID); err != nil {
-			return err
-		}
 	}
 
 	return a.streamReply(thread, cfg, model, store)

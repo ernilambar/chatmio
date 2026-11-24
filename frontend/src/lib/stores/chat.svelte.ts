@@ -219,13 +219,13 @@ class ChatStore {
         next[payload.index] = { step: payload.step, running: payload.running }
         this.streamTools = next
       }),
-      EventsOn('chat:done', async (payload: ChatDone) => {
+      // Show the finished reply at once. The send, regenerate or edit call
+      // that started it reloads the thread when it returns, so reloading here
+      // too would read every message and attachment twice.
+      EventsOn('chat:done', (payload: ChatDone) => {
         if (payload.threadId !== this.activeId) return
         this.resetStream()
-        const messages = await GetMessages(payload.threadId)
-        if (payload.threadId !== this.activeId) return
-        this.messages = messages
-        this.threads = await ListThreads()
+        this.messages = [...this.messages, db.Message.createFrom(payload.message)]
       }),
       EventsOn('chat:title', async (payload: ChatTitle) => {
         this.threads = this.threads.map((thread) =>
