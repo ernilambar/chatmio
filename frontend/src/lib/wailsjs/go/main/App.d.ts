@@ -10,6 +10,8 @@ export function CreateTemporaryThread():Promise<db.Thread>;
 
 export function CreateThread():Promise<db.Thread>;
 
+export function DeleteEmptyThreads(arg1:string):Promise<void>;
+
 export function DeleteThread(arg1:string):Promise<void>;
 
 export function EditMessage(arg1:string,arg2:string,arg3:string):Promise<void>;

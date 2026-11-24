@@ -130,6 +130,15 @@ const DefaultIdleTimeout = 2 * time.Minute
 // than the client's idle timeout.
 var ErrStreamStalled = errors.New("ai: provider stopped sending data")
 
+const (
+	// maxResponseBytes caps one provider response, streamed or not.
+	maxResponseBytes = 32 << 20
+	// MaxToolCalls caps the tool calls one response may request.
+	MaxToolCalls = 64
+)
+
+var errResponseTooLarge = fmt.Errorf("ai: provider response exceeds %d MiB", maxResponseBytes>>20)
+
 // Client talks to one OpenAI-compatible endpoint.
 type Client struct {
 	BaseURL string
@@ -147,9 +156,23 @@ func New(baseURL, apiKey string, headers map[string]string) *Client {
 		BaseURL:     strings.TrimRight(baseURL, "/"),
 		APIKey:      apiKey,
 		Headers:     headers,
-		HTTP:        http.DefaultClient,
+		HTTP:        &http.Client{CheckRedirect: sameOriginRedirect},
 		IdleTimeout: DefaultIdleTimeout,
 	}
+}
+
+// sameOriginRedirect refuses redirects to another scheme, host or port. Go
+// would otherwise replay the prompt body on a 307/308 to any origin and follow
+// an HTTPS to HTTP downgrade.
+func sameOriginRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("ai: stopped after 10 redirects")
+	}
+	from := via[0].URL
+	if req.URL.Scheme != from.Scheme || req.URL.Host != from.Host {
+		return fmt.Errorf("ai: refusing redirect from %s://%s to %s://%s", from.Scheme, from.Host, req.URL.Scheme, req.URL.Host)
+	}
+	return nil
 }
 
 func (c *Client) setHeaders(req *http.Request) {
@@ -282,6 +305,7 @@ type streamChunk struct {
 				} `json:"function"`
 			} `json:"tool_calls"`
 		} `json:"delta"`
+		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *usagePayload `json:"usage"`
 	Error *errorPayload `json:"error"`
@@ -377,7 +401,7 @@ func (c *Client) StreamChat(ctx context.Context, opts ChatOptions, onDelta func(
 		return reply, apiError(resp)
 	}
 
-	reader := bufio.NewReader(resp.Body)
+	reader := bufio.NewReader(&cappedReader{reader: resp.Body, left: maxResponseBytes})
 	if isJSONResponse(reader) {
 		reply, err := readCompletion(reader, &lastActivity, onDelta)
 		if err != nil && stalled.Load() {
@@ -388,6 +412,9 @@ func (c *Client) StreamChat(ctx context.Context, opts ChatOptions, onDelta func(
 
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	// finished records a terminal finish_reason, so a stream cut off early is
+	// an error rather than a complete reply.
+	finished := false
 	for scanner.Scan() {
 		lastActivity.Store(time.Now().UnixNano())
 		line := strings.TrimSpace(scanner.Text())
@@ -417,9 +444,14 @@ func (c *Client) StreamChat(ctx context.Context, opts ChatOptions, onDelta func(
 		if len(chunk.Choices) == 0 {
 			continue
 		}
+		if reason := chunk.Choices[0].FinishReason; reason != nil && *reason != "" {
+			finished = true
+		}
 		delta := chunk.Choices[0].Delta
 		for _, part := range delta.ToolCalls {
-			reply.ToolCalls = mergeToolCall(reply.ToolCalls, part.Index, part.ID, part.Function.Name, part.Function.Arguments)
+			if reply.ToolCalls, err = mergeToolCall(reply.ToolCalls, part.Index, part.ID, part.Function.Name, part.Function.Arguments); err != nil {
+				return reply, err
+			}
 		}
 		reasoning := delta.ReasoningContent
 		if reasoning == "" {
@@ -433,9 +465,34 @@ func (c *Client) StreamChat(ctx context.Context, opts ChatOptions, onDelta func(
 		return reply, streamError(context.Canceled, &stalled, idle)
 	}
 	if err := scanner.Err(); err != nil {
+		if errors.Is(err, errResponseTooLarge) {
+			return reply, errResponseTooLarge
+		}
 		return reply, fmt.Errorf("ai: read stream: %w", err)
 	}
+	// Some servers skip [DONE] but still send a finish_reason; accept either.
+	if !finished {
+		return reply, fmt.Errorf("ai: stream ended before the reply finished: %w", io.ErrUnexpectedEOF)
+	}
 	return reply, nil
+}
+
+// cappedReader fails once more than left bytes have been read.
+type cappedReader struct {
+	reader io.Reader
+	left   int64
+}
+
+func (r *cappedReader) Read(p []byte) (int, error) {
+	if r.left <= 0 {
+		return 0, errResponseTooLarge
+	}
+	if int64(len(p)) > r.left {
+		p = p[:r.left]
+	}
+	n, err := r.reader.Read(p)
+	r.left -= int64(n)
+	return n, err
 }
 
 // isJSONResponse reports whether the body starts with a JSON object instead of
@@ -477,6 +534,9 @@ func (r activityReader) Read(p []byte) (int, error) {
 func readCompletion(reader io.Reader, last *atomic.Int64, onDelta func(Delta)) (Reply, error) {
 	var reply Reply
 	body, err := io.ReadAll(activityReader{reader: reader, last: last})
+	if errors.Is(err, errResponseTooLarge) {
+		return reply, errResponseTooLarge
+	}
 	if err != nil {
 		return reply, fmt.Errorf("ai: read response: %w", err)
 	}
@@ -509,7 +569,9 @@ func readCompletion(reader io.Reader, last *atomic.Int64, onDelta func(Delta)) (
 	}
 	for i, call := range message.ToolCalls {
 		index := i
-		reply.ToolCalls = mergeToolCall(reply.ToolCalls, &index, call.ID, call.Function.Name, call.Function.Arguments)
+		if reply.ToolCalls, err = mergeToolCall(reply.ToolCalls, &index, call.ID, call.Function.Name, call.Function.Arguments); err != nil {
+			return reply, err
+		}
 	}
 	return reply, nil
 }
@@ -553,7 +615,8 @@ func streamError(err error, stalled *atomic.Bool, idle time.Duration) error {
 
 // mergeToolCall folds one streamed tool-call fragment into calls. Fragments
 // share an index; providers that omit it start a new call with each new id.
-func mergeToolCall(calls []ToolCall, index *int, id, name, arguments string) []ToolCall {
+// Indexes are bounded so a provider cannot force a huge allocation.
+func mergeToolCall(calls []ToolCall, index *int, id, name, arguments string) ([]ToolCall, error) {
 	i := len(calls) - 1
 	switch {
 	case index != nil:
@@ -561,8 +624,14 @@ func mergeToolCall(calls []ToolCall, index *int, id, name, arguments string) []T
 	case id != "" && (i < 0 || calls[i].ID != id):
 		i = len(calls)
 	}
+	if index != nil && (*index < 0 || *index >= MaxToolCalls) {
+		return calls, fmt.Errorf("ai: invalid tool call index %d", *index)
+	}
 	if i < 0 {
 		i = 0
+	}
+	if i >= MaxToolCalls {
+		return calls, fmt.Errorf("ai: more than %d tool calls in one response", MaxToolCalls)
 	}
 	for len(calls) <= i {
 		calls = append(calls, ToolCall{Type: "function"})
@@ -574,5 +643,5 @@ func mergeToolCall(calls []ToolCall, index *int, id, name, arguments string) []T
 		calls[i].Function.Name = name
 	}
 	calls[i].Function.Arguments += arguments
-	return calls
+	return calls, nil
 }

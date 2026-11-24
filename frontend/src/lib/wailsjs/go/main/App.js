@@ -14,6 +14,10 @@ export function CreateThread() {
   return window['go']['main']['App']['CreateThread']();
 }
 
+export function DeleteEmptyThreads(arg1) {
+  return window['go']['main']['App']['DeleteEmptyThreads'](arg1);
+}
+
 export function DeleteThread(arg1) {
   return window['go']['main']['App']['DeleteThread'](arg1);
 }

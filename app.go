@@ -46,6 +46,9 @@ const (
 	// maxToolRounds caps model turns that may call tools in one reply. The
 	// round after it is sent without tools so the model must answer.
 	maxToolRounds = 5
+	// maxToolCallsPerRound caps the tools run for one model turn, so a reply
+	// cannot spend more than maxToolRounds*maxToolCallsPerRound searches.
+	maxToolCallsPerRound = 8
 )
 
 // App is the backend bridge exposed to the frontend.
@@ -156,6 +159,12 @@ func (a *App) SaveConfig(cfg config.Config) error {
 	case "", "system", "light", "dark":
 	default:
 		return errors.New("theme must be system, light, or dark")
+	}
+	if base := strings.TrimSpace(cfg.BaseURL); base != "" {
+		u, err := url.Parse(base)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return errors.New("base URL must be an http or https URL")
+		}
 	}
 	if err := validateThreadSettings(db.ThreadSettings{
 		Temperature:      cfg.Temperature,
@@ -407,6 +416,15 @@ func (a *App) DeleteThread(threadID string) error {
 	delete(a.tempIDs, threadID)
 	a.tempMu.Unlock()
 	return nil
+}
+
+// DeleteEmptyThreads removes saved threads without messages, except keepID.
+func (a *App) DeleteEmptyThreads(keepID string) error {
+	store, err := a.diskStore()
+	if err != nil {
+		return err
+	}
+	return store.DeleteEmptyThreads(keepID)
 }
 
 // openCodeSessionHeaders returns the stable per-conversation session header
@@ -678,13 +696,8 @@ func (a *App) EditMessage(threadID, messageID, content string) error {
 		return errors.New("message is empty")
 	}
 
-	if err := store.UpdateMessageContent(messageID, content); err != nil {
+	if err := store.EditMessage(threadID, messageID, content); err != nil {
 		return err
-	}
-	if target < len(messages)-1 {
-		if err := store.DeleteMessagesAfter(threadID, messageID); err != nil {
-			return err
-		}
 	}
 
 	return a.streamReply(thread, cfg, model, store)
@@ -885,7 +898,13 @@ func (a *App) runTools(ctx context.Context, web *webtools.Client, threadID strin
 	}
 	prompt = append(prompt, ai.Message{Role: ai.RoleAssistant, Content: text, ToolCalls: calls})
 
-	for _, call := range calls {
+	for i, call := range calls {
+		// Every call needs an answer, so the ones over the cap get an error.
+		if i >= maxToolCallsPerRound {
+			result := fmt.Sprintf("Error: skipped; at most %d tool calls run per turn.", maxToolCallsPerRound)
+			prompt = append(prompt, ai.Message{Role: ai.RoleTool, ToolCallID: call.ID, Content: result})
+			continue
+		}
 		step := db.ToolStep{Name: call.Function.Name, Input: webtools.Input(call.Function.Arguments)}
 		index := len(steps)
 		steps = append(steps, step)

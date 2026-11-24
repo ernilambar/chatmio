@@ -37,6 +37,18 @@
   let section = $state<Section>('provider')
   let baseUrl = $state('')
   let apiKey = $state('')
+  // A key sent to a plain-HTTP remote host travels unencrypted. Loopback is
+  // fine; LAN servers still work but get a warning.
+  const insecureUrl = $derived.by(() => {
+    if (!apiKey.trim()) return false
+    try {
+      const { protocol, hostname } = new URL(baseUrl.trim())
+      const loopback = hostname === 'localhost' || hostname === '[::1]' || hostname.startsWith('127.')
+      return protocol === 'http:' && !loopback
+    } catch {
+      return false
+    }
+  })
   let chatModel = $state('')
   let titleModel = $state('')
   let systemPrompt = $state('')
@@ -408,6 +420,11 @@
                   placeholder="https://api.openai.com/v1"
                   required
                 />
+                {#if insecureUrl}
+                  <span class="block text-[11px] text-amber-500">
+                    Not encrypted: the API key and chats are sent in plain text.
+                  </span>
+                {/if}
               </label>
 
               <label class="block space-y-1">

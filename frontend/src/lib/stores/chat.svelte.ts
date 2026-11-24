@@ -2,6 +2,7 @@ import {
   CancelReply,
   CreateTemporaryThread,
   CreateThread,
+  DeleteEmptyThreads,
   DeleteThread,
   EditMessage,
   GetConfig,
@@ -107,6 +108,11 @@ class ChatStore {
   // creating serializes thread creation so a double click cannot insert two
   // blank chats before the first one is active.
   private creating = false
+  // generation increments on every chat switch so a slower earlier load
+  // cannot overwrite the chat that is now active.
+  private generation = 0
+  // cancelRequested records Stop pressed before the request was sent.
+  private cancelRequested = false
 
   get activeThread(): db.Thread | null {
     if (this.tempThread?.id === this.activeId) return this.tempThread
@@ -178,18 +184,13 @@ class ChatStore {
       await this.createThread()
     }
     // Drop other blank threads left behind by duplicate "New chat" presses.
-    const stale = this.threads.filter((thread) => thread.id !== this.activeId)
-    const empties = await Promise.all(
-      stale.map(async (thread) => ((await GetMessages(thread.id)).length === 0 ? thread.id : null))
-    )
-    for (const id of empties) {
-      if (!id) continue
-      try {
-        await DeleteThread(id)
-      } catch {
-        continue
-      }
-      this.threads = this.threads.filter((thread) => thread.id !== id)
+    // The backend checks and deletes in one statement, so a chat that gets a
+    // message meanwhile survives.
+    try {
+      await DeleteEmptyThreads(this.activeId ?? '')
+      this.threads = await ListThreads()
+    } catch {
+      // Cleanup is best-effort.
     }
     void this.loadModels()
   }
@@ -218,11 +219,13 @@ class ChatStore {
         next[payload.index] = { step: payload.step, running: payload.running }
         this.streamTools = next
       }),
-      EventsOn('chat:done', async (payload: ChatDone) => {
+      // Show the finished reply at once. The send, regenerate or edit call
+      // that started it reloads the thread when it returns, so reloading here
+      // too would read every message and attachment twice.
+      EventsOn('chat:done', (payload: ChatDone) => {
         if (payload.threadId !== this.activeId) return
         this.resetStream()
-        this.messages = await GetMessages(payload.threadId)
-        this.threads = await ListThreads()
+        this.messages = [...this.messages, db.Message.createFrom(payload.message)]
       }),
       EventsOn('chat:title', async (payload: ChatTitle) => {
         this.threads = this.threads.map((thread) =>
@@ -254,6 +257,13 @@ class ChatStore {
     const temporary = this.tempThread
     if (!temporary) return
     this.tempThread = null
+    // Leave nothing of the discarded chat on screen, even if what replaces it
+    // fails to load.
+    if (this.activeId === temporary.id) {
+      this.activeId = null
+      this.messages = []
+      this.resetStream()
+    }
     try {
       await DeleteThread(temporary.id)
     } catch {
@@ -271,14 +281,18 @@ class ChatStore {
     // no-op instead of inserting another blank thread.
     if (this.newChatOpen) return
     this.creating = true
+    const generation = ++this.generation
     try {
       await this.dropTemporary()
       const thread = await CreateThread()
       this.threads = [thread, ...this.threads]
+      if (generation !== this.generation) return
       this.activeId = thread.id
       this.messages = []
       this.error = null
       this.failedSend = null
+    } catch (err) {
+      this.error = err instanceof Error ? err.message : String(err)
     } finally {
       this.creating = false
     }
@@ -291,15 +305,23 @@ class ChatStore {
     // Already on an untouched temporary chat: pressing it again is a no-op.
     if (this.newTemporaryOpen) return
     this.creating = true
+    const generation = ++this.generation
     try {
       await this.dropTemporary()
       const thread = await CreateTemporaryThread()
+      if (generation !== this.generation) {
+        // Another chat was opened meanwhile; discard this one.
+        void DeleteThread(thread.id).catch(() => {})
+        return
+      }
       this.tempThread = thread
       this.activeId = thread.id
       this.messages = []
       this.error = null
       this.failedSend = null
       this.resetStream()
+    } catch (err) {
+      this.error = err instanceof Error ? err.message : String(err)
     } finally {
       this.creating = false
     }
@@ -307,22 +329,29 @@ class ChatStore {
 
   async select(id: string): Promise<void> {
     if (this.streaming || id === this.activeId) return
+    const generation = ++this.generation
     if (this.tempThread && id !== this.tempThread.id) {
       await this.dropTemporary()
+      if (generation !== this.generation) return
     }
     this.activeId = id
     this.error = null
     this.resetStream()
     this.failedSend = null
-    this.messages = await GetMessages(id)
+    const messages = await GetMessages(id)
+    if (generation !== this.generation) return
+    this.messages = messages
   }
 
-  async send(content: string, files: File[] = []): Promise<void> {
+  // send returns false when nothing was sent (invalid attachments or Stop
+  // pressed first), so the composer can restore the draft.
+  async send(content: string, files: File[] = []): Promise<boolean> {
     content = content.trim()
-    if ((!content && files.length === 0) || this.streaming || !this.activeId) return
+    if ((!content && files.length === 0) || this.streaming || !this.activeId) return false
 
     const threadId = this.activeId
     this.streaming = true
+    this.cancelRequested = false
     this.error = null
     this.resetStream()
     this.failedSend = null
@@ -333,7 +362,11 @@ class ChatStore {
     } catch (err) {
       this.streaming = false
       this.error = err instanceof Error ? err.message : String(err)
-      return
+      return false
+    }
+    if (this.cancelRequested) {
+      this.streaming = false
+      return false
     }
 
     const optimisticAttachments = attachments.map((attachment) =>
@@ -375,11 +408,14 @@ class ChatStore {
     } finally {
       this.streaming = false
     }
+    return true
   }
 
   // cancel stops the in-flight reply. The partial reply is kept by the backend.
+  // Pressed while attachments are still being read, it stops the send itself.
   async cancel(): Promise<void> {
     if (!this.streaming) return
+    this.cancelRequested = true
     try {
       await CancelReply()
     } catch (err) {

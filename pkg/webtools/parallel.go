@@ -104,7 +104,7 @@ func (c *Client) searchParallel(ctx context.Context, arguments string) (string, 
 	parts := make([]string, 0, len(payload.Results))
 	for i, r := range payload.Results {
 		parts = append(parts, fmt.Sprintf("%d. %s\n%s\n%s",
-			i+1, plainText(r.Title), r.URL, truncate(strings.Join(r.Excerpts, "\n\n"), maxResultRunes)))
+			i+1, shortTitle(plainText(r.Title)), r.URL, truncate(strings.Join(r.Excerpts, "\n\n"), maxResultRunes)))
 	}
 	return strings.Join(parts, "\n\n"), resultSummary(len(payload.Results)), nil
 }
@@ -131,7 +131,7 @@ func (c *Client) fetchParallel(ctx context.Context, rawURL string) (string, stri
 	}
 
 	page := payload.Results[0]
-	title := strings.TrimSpace(page.Title)
+	title := shortTitle(page.Title)
 	res := truncate(strings.Join(page.Excerpts, "\n\n"), maxPageRunes)
 	if title == "" {
 		title = u.Host
