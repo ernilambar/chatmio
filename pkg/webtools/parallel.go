@@ -22,7 +22,7 @@ func parallelSearchDefinition() ai.Tool {
 		Type: "function",
 		Function: ai.ToolFunction{
 			Name:        SearchTool,
-			Description: "Search the web for current information. Returns ranked titles, URLs and page excerpts that usually answer the question.",
+			Description: "Search the web for current information. Use only when the answer needs recent or unknown facts. Make one call with up to 3 queries; search again only if the results fall short. Returns ranked titles, URLs and page excerpts that usually answer the question.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

@@ -67,7 +67,7 @@ func searchDefinition() ai.Tool {
 		Type: "function",
 		Function: ai.ToolFunction{
 			Name:        SearchTool,
-			Description: "Search the web for current information. Returns titles, URLs and page excerpts.",
+			Description: "Search the web for current information. Use only when the answer needs recent or unknown facts. Prefer one search; search again only if the results fall short. Returns titles, URLs and page excerpts.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -84,7 +84,7 @@ func fetchDefinition() ai.Tool {
 		Type: "function",
 		Function: ai.ToolFunction{
 			Name:        FetchTool,
-			Description: "Fetch a web page by URL and return its readable text.",
+			Description: "Fetch a web page by URL and return its readable text. Use only when search excerpts are not enough.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

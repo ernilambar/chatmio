@@ -45,10 +45,10 @@ const (
 	maxTitleSourceRunes    = 4000
 	// maxToolRounds caps model turns that may call tools in one reply. The
 	// round after it is sent without tools so the model must answer.
-	maxToolRounds = 5
+	maxToolRounds = 3
 	// maxToolCallsPerRound caps the tools run for one model turn, so a reply
 	// cannot spend more than maxToolRounds*maxToolCallsPerRound searches.
-	maxToolCallsPerRound = 8
+	maxToolCallsPerRound = 3
 )
 
 // App is the backend bridge exposed to the frontend.

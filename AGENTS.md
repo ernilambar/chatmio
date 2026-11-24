@@ -16,7 +16,7 @@ its free anonymous tier and its search takes `objective` + `search_queries`, so
 `Client.Definitions` returns provider-specific schemas; Brave and Ollama need a key before the tools
 are enabled. Parallel and
 Ollama fetch pages through their own APIs; Brave fetches locally and rejects loopback/private
-addresses. `streamReply` in `app.go` runs the OpenAI tool-call loop (max 5 rounds); tool steps are
+addresses. `streamReply` in `app.go` runs the OpenAI tool-call loop (max 3 rounds, 3 calls each); tool steps are
 stored on the assistant message for display only and are not replayed to the model.
 
 ## Setup
