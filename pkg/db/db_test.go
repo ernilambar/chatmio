@@ -288,3 +288,28 @@ func TestWebToolsAndToolStepsRoundTrip(t *testing.T) {
 		t.Fatalf("plain message tools = %+v, want nil", messages[1].Tools)
 	}
 }
+
+func TestOpenMemoryKeepsTempStoreInMemory(t *testing.T) {
+	store, err := OpenMemory()
+	if err != nil {
+		t.Fatalf("OpenMemory: %v", err)
+	}
+	defer store.Close()
+
+	var mode int
+	if err := store.db.QueryRow(`PRAGMA temp_store`).Scan(&mode); err != nil {
+		t.Fatalf("PRAGMA temp_store: %v", err)
+	}
+	if mode != 2 {
+		t.Fatalf("temp_store = %d, want 2 (memory)", mode)
+	}
+}
+
+func TestExcerptHandlesLowercaseByteGrowth(t *testing.T) {
+	// U+023A lowercases to U+2C65, growing from two bytes to three.
+	content := strings.Repeat("Ⱥ", 200) + " needle"
+	snippet := excerpt(content, "needle")
+	if !strings.Contains(snippet, "needle") {
+		t.Fatalf("snippet = %q, want the match", snippet)
+	}
+}

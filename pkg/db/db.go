@@ -164,6 +164,7 @@ func Open(path string) (*Store, error) {
 func OpenMemory() (*Store, error) {
 	return open("file:temp-" + uuid.NewString() +
 		"?mode=memory&cache=shared" +
+		"&_pragma=temp_store(MEMORY)" +
 		"&_pragma=foreign_keys(1)" +
 		"&_pragma=busy_timeout(5000)")
 }
@@ -337,9 +338,12 @@ func excerpt(content, query string) string {
 	}
 
 	start := 0
-	index := strings.Index(strings.ToLower(content), strings.ToLower(query))
+	// Lowercasing keeps the rune count but can change byte lengths, so count
+	// runes in the lowered string rather than slicing the original.
+	lower := strings.ToLower(content)
+	index := strings.Index(lower, strings.ToLower(query))
 	if index >= 0 {
-		matchRune := len([]rune(content[:index]))
+		matchRune := len([]rune(lower[:index]))
 		start = matchRune - searchSnippetLead
 		if start < 0 {
 			start = 0

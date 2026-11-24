@@ -237,6 +237,8 @@
       cancelEdit()
       return
     }
+    // Enter while an IME is composing confirms a candidate, not the message.
+    if (event.isComposing || event.keyCode === 229) return
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       submit()
