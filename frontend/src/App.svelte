@@ -3,7 +3,7 @@
   import Sidebar from './lib/components/Sidebar.svelte'
   import ChatWindow from './lib/components/ChatWindow.svelte'
   import SearchPalette from './lib/components/SearchPalette.svelte'
-  import SettingsModal from './lib/components/SettingsModal.svelte'
+  import SettingsPage from './lib/components/SettingsPage.svelte'
   import AboutModal from './lib/components/AboutModal.svelte'
   import ChatSettingsModal from './lib/components/ChatSettingsModal.svelte'
   import { EventsOn } from './lib/wailsjs/runtime/runtime'
@@ -68,6 +68,7 @@
 
     if (mod && key === 'k') {
       event.preventDefault()
+      if (settingsOpen) return
       searchOpen = !searchOpen
       return
     }
@@ -83,6 +84,8 @@
     }
     if (mod && event.key === ',') {
       event.preventDefault()
+      if (settingsOpen) return
+      searchOpen = false
       settingsOpen = true
       return
     }
@@ -113,60 +116,71 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="flex h-full">
-  {#if sidebarOpen}
-    <Sidebar
-      threads={chat.threads}
-      activeId={chat.activeId}
-      temporaryActive={chat.temporary}
-      canCreate={chat.chatModelReady}
-      newChatOpen={chat.newChatOpen}
-      newTemporaryOpen={chat.newTemporaryOpen}
-      oncreate={() => chat.createThread()}
-      oncreatetemporary={() => chat.createTemporaryThread()}
-      onselect={(id) => chat.select(id)}
-      onsettings={() => (settingsOpen = true)}
-      onsearch={() => (searchOpen = true)}
-      onhide={toggleSidebar}
-      ondelete={(id) => chat.deleteThread(id)}
-      onrename={(id, title) => chat.renameThread(id, title)}
+  {#if settingsOpen}
+    <SettingsPage
+      cfg={chat.config}
+      onclose={() => (settingsOpen = false)}
+      onsave={(next) => chat.saveConfig(next)}
     />
   {/if}
-  <ChatWindow
-    thread={activeThread}
-    temporary={chat.temporary}
-    messages={chat.messages}
-    streaming={chat.streaming}
-    streamText={chat.streamText}
-    streamReasoning={chat.streamReasoning}
-    streamTools={chat.streamTools}
-    webToolsAvailable={!!(
-      // Mirrors searchReady in app.go: a chat only offers web tools when the
-      // global switch is on and the selected provider can actually run.
-      chat.config?.webToolsEnabled &&
-      (chat.config?.searchProvider === 'ollama'
-        ? chat.config?.ollamaApiKey
-        : chat.config?.searchProvider === 'brave'
-          ? chat.config?.braveApiKey
-          : true)
-    )}
-    onwebtoolschange={(enabled) => chat.setThreadWebTools(enabled)}
-    contextUsed={chat.contextUsed}
-    contextWindow={chat.contextWindow}
-    error={chat.error}
-    models={chat.models}
-    defaultModel={chat.config?.chatModel ?? ''}
-    sidebarHidden={!sidebarOpen}
-    onshowsidebar={toggleSidebar}
-    onsend={(content, files) => chat.send(content, files)}
-    onretry={() => chat.retry()}
-    canRetry={chat.canRetry}
-    onregenerate={() => chat.regenerate()}
-    onedit={(id, content) => chat.edit(id, content)}
-    onmodelchange={(model) => chat.setThreadModel(model)}
-    oncancel={() => void chat.cancel()}
-    onopensettings={() => (chatSettingsOpen = true)}
-    focusNonce={composerFocus}
-  />
+  <!-- Keep the chat mounted but hidden: an unsent draft, its attachments, and
+       the scroll position survive a trip to settings. -->
+  <div class="flex h-full min-w-0 flex-1" class:hidden={settingsOpen}>
+    {#if sidebarOpen}
+      <Sidebar
+        threads={chat.threads}
+        activeId={chat.activeId}
+        temporaryActive={chat.temporary}
+        canCreate={chat.chatModelReady}
+        newChatOpen={chat.newChatOpen}
+        newTemporaryOpen={chat.newTemporaryOpen}
+        oncreate={() => chat.createThread()}
+        oncreatetemporary={() => chat.createTemporaryThread()}
+        onselect={(id) => chat.select(id)}
+        onsettings={() => (settingsOpen = true)}
+        onsearch={() => (searchOpen = true)}
+        onhide={toggleSidebar}
+        ondelete={(id) => chat.deleteThread(id)}
+        onrename={(id, title) => chat.renameThread(id, title)}
+      />
+    {/if}
+    <ChatWindow
+      thread={activeThread}
+      temporary={chat.temporary}
+      messages={chat.messages}
+      streaming={chat.streaming}
+      streamText={chat.streamText}
+      streamReasoning={chat.streamReasoning}
+      streamTools={chat.streamTools}
+      webToolsAvailable={!!(
+        // Mirrors searchReady in app.go: a chat only offers web tools when the
+        // global switch is on and the selected provider can actually run.
+        chat.config?.webToolsEnabled &&
+        (chat.config?.searchProvider === 'ollama'
+          ? chat.config?.ollamaApiKey
+          : chat.config?.searchProvider === 'brave'
+            ? chat.config?.braveApiKey
+            : true)
+      )}
+      onwebtoolschange={(enabled) => chat.setThreadWebTools(enabled)}
+      contextUsed={chat.contextUsed}
+      contextWindow={chat.contextWindow}
+      error={chat.error}
+      models={chat.models}
+      defaultModel={chat.config?.chatModel ?? ''}
+      sidebarHidden={!sidebarOpen}
+      onshowsidebar={toggleSidebar}
+      onsend={(content, files) => chat.send(content, files)}
+      onretry={() => chat.retry()}
+      canRetry={chat.canRetry}
+      onregenerate={() => chat.regenerate()}
+      onedit={(id, content) => chat.edit(id, content)}
+      onmodelchange={(model) => chat.setThreadModel(model)}
+      oncancel={() => void chat.cancel()}
+      onopensettings={() => (chatSettingsOpen = true)}
+      focusNonce={composerFocus}
+    />
+  </div>
 </div>
 
 <SearchPalette
@@ -174,13 +188,6 @@
   threads={chat.threads}
   onselect={(id) => void chat.select(id)}
   onclose={() => (searchOpen = false)}
-/>
-
-<SettingsModal
-  open={settingsOpen}
-  cfg={chat.config}
-  onclose={() => (settingsOpen = false)}
-  onsave={(next) => chat.saveConfig(next)}
 />
 
 <ChatSettingsModal
