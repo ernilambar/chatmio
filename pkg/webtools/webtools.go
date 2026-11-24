@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/netip"
@@ -39,6 +40,7 @@ const (
 
 	searchResults    = 2
 	maxResultRunes   = 1000
+	maxTitleRunes    = 200
 	maxPageRunes     = 8000
 	maxResponseBytes = 4 << 20
 	requestTimeout   = 30 * time.Second
@@ -224,11 +226,14 @@ func (c *Client) searchBrave(ctx context.Context, query string) (string, string,
 	if len(payload.Web.Results) == 0 {
 		return "No results.", "0 results", nil
 	}
+	if len(payload.Web.Results) > searchResults {
+		payload.Web.Results = payload.Web.Results[:searchResults]
+	}
 
 	parts := make([]string, 0, len(payload.Web.Results))
 	for i, r := range payload.Web.Results {
 		parts = append(parts, fmt.Sprintf("%d. %s\n%s\n%s",
-			i+1, plainText(r.Title), r.URL, truncate(plainText(r.Description), maxResultRunes)))
+			i+1, shortTitle(plainText(r.Title)), r.URL, truncate(plainText(r.Description), maxResultRunes)))
 	}
 	return strings.Join(parts, "\n\n"), resultSummary(len(payload.Web.Results)), nil
 }
@@ -247,11 +252,14 @@ func (c *Client) searchOllama(ctx context.Context, query string) (string, string
 	if len(payload.Results) == 0 {
 		return "No results.", "0 results", nil
 	}
+	if len(payload.Results) > searchResults {
+		payload.Results = payload.Results[:searchResults]
+	}
 
 	parts := make([]string, 0, len(payload.Results))
 	for i, r := range payload.Results {
 		parts = append(parts, fmt.Sprintf("%d. %s\n%s\n%s",
-			i+1, r.Title, r.URL, truncate(r.Content, maxResultRunes)))
+			i+1, shortTitle(r.Title), r.URL, truncate(r.Content, maxResultRunes)))
 	}
 	return strings.Join(parts, "\n\n"), resultSummary(len(payload.Results)), nil
 }
@@ -289,6 +297,11 @@ func (c *Client) fetchBrave(ctx context.Context, rawURL string) (string, string,
 	}
 
 	contentType := resp.Header.Get("Content-Type")
+	// Media types are case-insensitive; ParseMediaType lowercases them.
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		mediaType = strings.ToLower(strings.TrimSpace(contentType))
+	}
 	body := io.LimitReader(resp.Body, maxResponseBytes)
 	decoded, err := charset.NewReader(body, contentType)
 	if err != nil {
@@ -297,9 +310,9 @@ func (c *Client) fetchBrave(ctx context.Context, rawURL string) (string, string,
 
 	var title, text string
 	switch {
-	case contentType == "" || strings.Contains(contentType, "html"):
+	case mediaType == "" || strings.Contains(mediaType, "html"):
 		title, text, err = htmlText(decoded)
-	case strings.HasPrefix(contentType, "text/"):
+	case strings.HasPrefix(mediaType, "text/"):
 		var data []byte
 		data, err = io.ReadAll(decoded)
 		text = string(data)
@@ -310,6 +323,7 @@ func (c *Client) fetchBrave(ctx context.Context, rawURL string) (string, string,
 		return "", "", fmt.Errorf("webtools: read page: %w", err)
 	}
 
+	title = shortTitle(title)
 	if title == "" {
 		title = u.Host
 	}
@@ -328,7 +342,7 @@ func (c *Client) fetchOllama(ctx context.Context, url string) (string, string, e
 	if err := c.post(ctx, "/web_fetch", map[string]any{"url": url}, &payload); err != nil {
 		return "", "", err
 	}
-	title := strings.TrimSpace(payload.Title)
+	title := shortTitle(payload.Title)
 	result := truncate(payload.Content, maxPageRunes)
 	if title != "" {
 		result = "# " + title + "\n\n" + result
@@ -583,6 +597,17 @@ func normalizeText(s string) string {
 		}
 	}
 	return strings.Join(out, "\n")
+}
+
+// shortTitle trims a page or result title to maxTitleRunes, so a huge <title>
+// cannot get past the page output limit.
+func shortTitle(s string) string {
+	s = strings.TrimSpace(s)
+	runes := []rune(s)
+	if len(runes) <= maxTitleRunes {
+		return s
+	}
+	return string(runes[:maxTitleRunes]) + "…"
 }
 
 func truncate(s string, limit int) string {

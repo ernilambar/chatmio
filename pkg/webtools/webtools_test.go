@@ -201,3 +201,56 @@ func TestIsPublicAddr(t *testing.T) {
 		}
 	}
 }
+
+func TestFetchAcceptsMixedCaseContentType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "Text/HTML; Charset=UTF-8")
+		w.Write([]byte("<html><head><title>Mixed</title></head><body><p>case</p></body></html>"))
+	}))
+	defer server.Close()
+
+	client := New(ProviderBrave, "key")
+	client.allowPrivate = true
+	result, summary, err := client.Run(context.Background(), FetchTool, `{"url":"`+server.URL+`"}`)
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if summary != "Mixed" || !strings.Contains(result, "case") {
+		t.Fatalf("fetch = %q, %q", result, summary)
+	}
+}
+
+func TestFetchCapsTitleAndSearchResults(t *testing.T) {
+	longTitle := strings.Repeat("t", 10000)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/web/search":
+			w.Write([]byte(`{"web":{"results":[` +
+				`{"title":"a","url":"https://a"},{"title":"b","url":"https://b"},{"title":"c","url":"https://c"}]}}`))
+		default:
+			w.Header().Set("Content-Type", "text/html")
+			w.Write([]byte("<html><head><title>" + longTitle + "</title></head><body>x</body></html>"))
+		}
+	}))
+	defer server.Close()
+
+	client := New(ProviderBrave, "key")
+	client.BaseURL = server.URL
+	client.allowPrivate = true
+
+	result, summary, err := client.Run(context.Background(), SearchTool, `{"query":"q"}`)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if summary != "2 results" || strings.Contains(result, "https://c") {
+		t.Fatalf("search = %q, %q; want 2 results", result, summary)
+	}
+
+	_, summary, err = client.Run(context.Background(), FetchTool, `{"url":"`+server.URL+`/page"}`)
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if n := len([]rune(summary)); n > maxTitleRunes+1 {
+		t.Fatalf("title has %d runes, want at most %d", n, maxTitleRunes+1)
+	}
+}
