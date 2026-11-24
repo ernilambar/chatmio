@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -100,6 +101,11 @@ type Client struct {
 	APIKey   string
 	HTTP     *http.Client
 
+	// fetchHTTP fetches model-chosen pages. Its dialer connects only to the
+	// addresses it has checked, so DNS rebinding cannot reach private hosts.
+	fetchHTTP *http.Client
+	// lookup resolves hostnames; tests replace it.
+	lookup func(ctx context.Context, host string) ([]netip.Addr, error)
 	// allowPrivate lets tests fetch loopback servers.
 	allowPrivate bool
 }
@@ -126,19 +132,23 @@ func New(provider, apiKey string) *Client {
 	case ProviderBrave:
 		base = BraveBaseURL
 	}
-	c := &Client{Provider: provider, BaseURL: base, APIKey: apiKey}
-	c.HTTP = &http.Client{
-		Timeout: requestTimeout,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return errors.New("stopped after 10 redirects")
-			}
-			if c.allowPrivate {
-				return nil
-			}
-			return checkPublic(req.Context(), req.URL)
-		},
+	c := &Client{Provider: provider, BaseURL: base, APIKey: apiKey, lookup: lookupHost}
+	checkRedirect := func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		if c.allowPrivate {
+			return nil
+		}
+		return c.checkPublic(req.Context(), req.URL)
 	}
+	c.HTTP = &http.Client{Timeout: requestTimeout, CheckRedirect: checkRedirect}
+
+	// No proxy: the dialer must see the page's own address, not the proxy's.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DialContext = c.dialPublic
+	c.fetchHTTP = &http.Client{Timeout: requestTimeout, CheckRedirect: checkRedirect, Transport: transport}
 	return c
 }
 
@@ -255,7 +265,7 @@ func (c *Client) fetchBrave(ctx context.Context, rawURL string) (string, string,
 		return "", "", fmt.Errorf("webtools: unsupported url scheme %q", u.Scheme)
 	}
 	if !c.allowPrivate {
-		if err := checkPublic(ctx, u); err != nil {
+		if err := c.checkPublic(ctx, u); err != nil {
 			return "", "", err
 		}
 	}
@@ -267,7 +277,7 @@ func (c *Client) fetchBrave(ctx context.Context, rawURL string) (string, string,
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1")
 
-	resp, err := c.HTTP.Do(req)
+	resp, err := c.fetchHTTP.Do(req)
 	if err != nil {
 		return "", "", fmt.Errorf("webtools: request failed: %w", err)
 	}
@@ -387,35 +397,100 @@ func resultSummary(n int) string {
 
 // checkPublic rejects URLs that resolve to loopback or private addresses so a
 // model-generated URL cannot reach services on the user's machine or network.
-func checkPublic(ctx context.Context, u *url.URL) error {
+// It fails early; dialPublic enforces the same rule on the actual connection.
+func (c *Client) checkPublic(ctx context.Context, u *url.URL) error {
 	host := u.Hostname()
 	if host == "" {
 		return errors.New("webtools: url has no host")
 	}
-	if ip := net.ParseIP(host); ip != nil {
-		if !isPublicIP(ip) {
-			return fmt.Errorf("webtools: refusing to fetch non-public address %s", ip)
-		}
-		return nil
-	}
-	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-	if err != nil {
-		return fmt.Errorf("webtools: resolve %s: %w", host, err)
-	}
-	if len(addrs) == 0 {
-		return fmt.Errorf("webtools: resolve %s: no addresses", host)
-	}
-	for _, addr := range addrs {
-		if !isPublicIP(addr.IP) {
-			return fmt.Errorf("webtools: refusing to fetch non-public address %s", host)
-		}
-	}
-	return nil
+	_, err := c.resolvePublic(ctx, host)
+	return err
 }
 
-func isPublicIP(ip net.IP) bool {
-	return !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsLinkLocalUnicast() &&
-		!ip.IsLinkLocalMulticast() && !ip.IsUnspecified() && !ip.IsMulticast()
+// dialPublic resolves the host once, refuses any non-public address, and dials
+// the checked address itself so a second DNS answer cannot redirect it.
+func (c *Client) dialPublic(ctx context.Context, network, address string) (net.Conn, error) {
+	dialer := net.Dialer{Timeout: requestTimeout, KeepAlive: 30 * time.Second}
+	if c.allowPrivate {
+		return dialer.DialContext(ctx, network, address)
+	}
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, fmt.Errorf("webtools: invalid address %q: %w", address, err)
+	}
+	addrs, err := c.resolvePublic(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	var lastErr error
+	for _, addr := range addrs {
+		conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(addr.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
+// resolvePublic returns host's addresses, or an error if any is not public.
+func (c *Client) resolvePublic(ctx context.Context, host string) ([]netip.Addr, error) {
+	if addr, err := netip.ParseAddr(host); err == nil {
+		addr = addr.Unmap()
+		if !isPublicAddr(addr) {
+			return nil, fmt.Errorf("webtools: refusing to fetch non-public address %s", addr)
+		}
+		return []netip.Addr{addr}, nil
+	}
+	addrs, err := c.lookup(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("webtools: resolve %s: %w", host, err)
+	}
+	if len(addrs) == 0 {
+		return nil, fmt.Errorf("webtools: resolve %s: no addresses", host)
+	}
+	for i, addr := range addrs {
+		addrs[i] = addr.Unmap()
+		if !isPublicAddr(addrs[i]) {
+			return nil, fmt.Errorf("webtools: refusing to fetch non-public address %s", host)
+		}
+	}
+	return addrs, nil
+}
+
+func lookupHost(ctx context.Context, host string) ([]netip.Addr, error) {
+	return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+}
+
+// nonPublicPrefixes are the IANA special-purpose ranges that are not globally
+// reachable, plus translation ranges that can embed a private IPv4 address.
+var nonPublicPrefixes = func() []netip.Prefix {
+	ranges := []string{
+		"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
+		"172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24", "192.88.99.0/24", "192.168.0.0/16",
+		"198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4",
+		"::/128", "::1/128", "64:ff9b::/96", "64:ff9b:1::/48", "100::/64", "2001::/23",
+		"2001:db8::/32", "2002::/16", "3fff::/20", "5f00::/16", "fc00::/7", "fe80::/10", "ff00::/8",
+	}
+	prefixes := make([]netip.Prefix, len(ranges))
+	for i, r := range ranges {
+		prefixes[i] = netip.MustParsePrefix(r)
+	}
+	return prefixes
+}()
+
+// isPublicAddr reports whether addr is globally routable. Callers pass
+// unmapped addresses so IPv4-mapped IPv6 is checked as IPv4.
+func isPublicAddr(addr netip.Addr) bool {
+	if !addr.IsValid() {
+		return false
+	}
+	for _, prefix := range nonPublicPrefixes {
+		if prefix.Contains(addr) {
+			return false
+		}
+	}
+	return true
 }
 
 var blockTags = map[string]bool{
