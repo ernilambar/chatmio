@@ -313,3 +313,30 @@ func TestExcerptHandlesLowercaseByteGrowth(t *testing.T) {
 		t.Fatalf("snippet = %q, want the match", snippet)
 	}
 }
+
+func TestDeleteEmptyThreadsKeepsActiveAndNonEmpty(t *testing.T) {
+	store := openTestStore(t)
+	for _, id := range []string{"active", "empty", "used"} {
+		if err := store.CreateThread(Thread{ID: id, CreatedAt: 1, UpdatedAt: 1}); err != nil {
+			t.Fatalf("CreateThread(%s): %v", id, err)
+		}
+	}
+	if err := store.AddMessage(Message{ID: "m1", ThreadID: "used", Role: "user", Content: "hi", CreatedAt: 2}); err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+
+	if err := store.DeleteEmptyThreads("active"); err != nil {
+		t.Fatalf("DeleteEmptyThreads: %v", err)
+	}
+	threads, err := store.ListThreads()
+	if err != nil {
+		t.Fatalf("ListThreads: %v", err)
+	}
+	ids := map[string]bool{}
+	for _, thread := range threads {
+		ids[thread.ID] = true
+	}
+	if !ids["active"] || !ids["used"] || ids["empty"] || len(ids) != 2 {
+		t.Fatalf("threads = %v, want active and used", ids)
+	}
+}

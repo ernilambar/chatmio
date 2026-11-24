@@ -66,7 +66,7 @@
     error: string | null
     models: string[]
     defaultModel: string
-    onsend: (content: string, files: File[]) => void
+    onsend: (content: string, files: File[]) => Promise<boolean>
     onretry: () => void
     canRetry: boolean
     onregenerate: () => void
@@ -227,7 +227,13 @@
     draft = ''
     files = []
     atBottom = true
-    onsend(content, selected)
+    void onsend(content, selected).then((sent) => {
+      // Nothing was sent: put the message back unless a new one was started.
+      if (!sent && !draft && files.length === 0) {
+        draft = content
+        files = selected
+      }
+    })
     inputEl?.focus()
   }
 

@@ -409,6 +409,15 @@ func (a *App) DeleteThread(threadID string) error {
 	return nil
 }
 
+// DeleteEmptyThreads removes saved threads without messages, except keepID.
+func (a *App) DeleteEmptyThreads(keepID string) error {
+	store, err := a.diskStore()
+	if err != nil {
+		return err
+	}
+	return store.DeleteEmptyThreads(keepID)
+}
+
 // openCodeSessionHeaders returns the stable per-conversation session header
 // OpenCode Go requires to route inference requests. Other providers ignore the
 // header, so it is only sent to opencode.ai hosts.

@@ -463,6 +463,20 @@ func (s *Store) DeleteThread(id string) error {
 	return nil
 }
 
+// DeleteEmptyThreads removes every thread except keepID that has no messages.
+// The emptiness check and the delete are one statement, so a thread that gets
+// a message meanwhile is never removed.
+func (s *Store) DeleteEmptyThreads(keepID string) error {
+	_, err := s.db.Exec(`
+		DELETE FROM threads
+		WHERE id != ?
+		  AND NOT EXISTS (SELECT 1 FROM messages WHERE thread_id = threads.id)`, keepID)
+	if err != nil {
+		return fmt.Errorf("db: delete empty threads: %w", err)
+	}
+	return nil
+}
+
 // AddMessage inserts a message and its attachments.
 func (s *Store) AddMessage(m Message) error {
 	tx, err := s.db.Begin()
