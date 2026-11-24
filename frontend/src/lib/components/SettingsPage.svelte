@@ -1,0 +1,635 @@
+<script lang="ts">
+  import { untrack } from 'svelte'
+  import { ArrowLeft, Monitor, Moon, RefreshCw, Sun } from 'lucide-svelte'
+  import { ListModels, TestConnection } from '../wailsjs/go/main/App'
+  import { config } from '../wailsjs/go/models'
+  import { theme, type ThemeMode } from '../stores/theme.svelte'
+  import ModelCombobox from './ModelCombobox.svelte'
+
+  let {
+    cfg,
+    onclose,
+    onsave
+  }: {
+    cfg: config.Config | null
+    onclose: () => void
+    onsave: (next: config.Config) => Promise<void>
+  } = $props()
+
+  type Section = 'appearance' | 'chat' | 'provider' | 'web'
+
+  const sections: { id: Section; label: string }[] = [
+    { id: 'provider', label: 'Provider' },
+    { id: 'chat', label: 'Chat defaults' },
+    { id: 'web', label: 'Web tools' },
+    { id: 'appearance', label: 'Appearance' }
+  ]
+
+  const themeOptions: { id: ThemeMode; label: string; icon: typeof Monitor }[] = [
+    { id: 'system', label: 'System', icon: Monitor },
+    { id: 'light', label: 'Light', icon: Sun },
+    { id: 'dark', label: 'Dark', icon: Moon }
+  ]
+
+  let section = $state<Section>('provider')
+  let baseUrl = $state('')
+  let apiKey = $state('')
+  // A key sent to a plain-HTTP remote host travels unencrypted. Loopback is
+  // fine; LAN servers still work but get a warning.
+  const insecureUrl = $derived.by(() => {
+    if (!apiKey.trim()) return false
+    try {
+      const { protocol, hostname } = new URL(baseUrl.trim())
+      const loopback = hostname === 'localhost' || hostname === '[::1]' || hostname.startsWith('127.')
+      return protocol === 'http:' && !loopback
+    } catch {
+      return false
+    }
+  })
+  let chatModel = $state('')
+  let titleModel = $state('')
+  let systemPrompt = $state('')
+  let contextWindow = $state<number | null>(null)
+  let temperature = $state<number | null>(null)
+  let topP = $state<number | null>(null)
+  let maxTokens = $state<number | null>(null)
+  let frequencyPenalty = $state<number | null>(null)
+  let braveApiKey = $state('')
+  let ollamaApiKey = $state('')
+  let parallelApiKey = $state('')
+  let webSearch = $state(false)
+  let searchProvider = $state<'parallel' | 'brave' | 'ollama'>('parallel')
+  let themeMode = $state<ThemeMode>('system')
+  let initialTheme = $state<ThemeMode>('system')
+  let models = $state<string[]>([])
+  let modelsLoading = $state(false)
+  let modelsError = $state<string | null>(null)
+  // False when the provider does not implement GET /models.
+  let modelsListed = $state(true)
+  // The base URL and key the current model list belongs to. Plain variable so
+  // the reload effect does not track it.
+  let modelsFor = ''
+  let saving = $state(false)
+  let testing = $state(false)
+  let testResult = $state<{ ok: boolean; message: string } | null>(null)
+  let error = $state<string | null>(null)
+
+  const sectionTitle = $derived(sections.find((item) => item.id === section)?.label ?? 'Settings')
+  const modelOptions = $derived(
+    Array.from(new Set([chatModel, ...models].filter((model) => model !== '')))
+  )
+  const titleOptions = $derived(
+    Array.from(new Set([titleModel, chatModel, ...models].filter((model) => model !== '')))
+  )
+  const modelsStatus = $derived(
+    modelsLoading
+      ? { tone: 'muted', text: 'Loading models from the provider…' }
+      : modelsError
+        ? { tone: 'error', text: modelsError }
+        : !modelsListed
+          ? {
+              tone: 'error',
+              text: "The provider doesn't list models. Enter the model ID, then test the connection."
+            }
+          : { tone: 'ok', text: `Connected · ${models.length} models` }
+  )
+
+  $effect(() => {
+    if (cfg) {
+      baseUrl = cfg.baseUrl
+      apiKey = cfg.apiKey
+      chatModel = cfg.chatModel
+      titleModel = cfg.titleModel
+      systemPrompt = cfg.systemPrompt
+      contextWindow = cfg.contextWindow || null
+      temperature = cfg.temperature ?? null
+      topP = cfg.topP ?? null
+      maxTokens = cfg.maxTokens ?? null
+      frequencyPenalty = cfg.frequencyPenalty ?? null
+      braveApiKey = cfg.braveApiKey
+      ollamaApiKey = cfg.ollamaApiKey
+      parallelApiKey = cfg.parallelApiKey
+      webSearch = cfg.webToolsEnabled
+      searchProvider =
+        cfg.searchProvider === 'ollama' || cfg.searchProvider === 'brave'
+          ? cfg.searchProvider
+          : 'parallel'
+      const savedTheme = cfg.theme === 'light' || cfg.theme === 'dark' ? cfg.theme : 'system'
+      themeMode = savedTheme
+      initialTheme = savedTheme
+      section = 'provider'
+      error = null
+      untrack(() => void loadModels())
+    }
+  })
+
+  // A result belongs to the values it was produced from; editing any of them
+  // makes it stale.
+  $effect(() => {
+    baseUrl
+    apiKey
+    chatModel
+    testResult = null
+  })
+
+  // The model list belongs to the base URL and key it was loaded with; editing
+  // either drops it and reloads once typing pauses.
+  $effect(() => {
+    const target = modelsTarget(baseUrl, apiKey)
+    if (target === modelsFor) return
+    models = []
+    modelsError = null
+    modelsListed = true
+    modelsLoading = true
+    const timer = setTimeout(() => void loadModels(), 600)
+    return () => clearTimeout(timer)
+  })
+
+  function modelsTarget(url: string, key: string): string {
+    return `${url.trim()}\n${key}`
+  }
+
+  async function loadModels(): Promise<void> {
+    const url = baseUrl.trim()
+    const key = apiKey
+    const target = modelsTarget(url, key)
+    modelsFor = target
+    modelsError = null
+    modelsListed = true
+    if (!url) {
+      models = []
+      modelsLoading = false
+      modelsError = 'Set a base URL to load models.'
+      return
+    }
+
+    modelsLoading = true
+    try {
+      const next = await ListModels(url, key)
+      // A newer edit or refresh owns the result.
+      if (modelsFor !== target) return
+      models = next.models
+      modelsListed = next.listed
+      if (next.listed && next.models.length === 0) {
+        modelsError = 'The provider returned no models.'
+      }
+    } catch (err) {
+      if (modelsFor !== target) return
+      models = []
+      modelsError = err instanceof Error ? err.message : String(err)
+    } finally {
+      if (modelsFor === target) modelsLoading = false
+    }
+  }
+
+  async function testConnection(): Promise<void> {
+    const url = baseUrl.trim()
+    const key = apiKey.trim()
+    const model = chatModel.trim()
+    if (!url) {
+      testResult = { ok: false, message: 'Set a base URL first.' }
+      return
+    }
+    const current = (): boolean =>
+      baseUrl.trim() === url && apiKey.trim() === key && chatModel.trim() === model
+    testing = true
+    testResult = null
+    try {
+      const message = await TestConnection(url, key, model)
+      if (current()) testResult = { ok: true, message }
+    } catch (err) {
+      if (current()) {
+        testResult = { ok: false, message: err instanceof Error ? err.message : String(err) }
+      }
+    } finally {
+      testing = false
+    }
+  }
+
+  function selectTheme(next: ThemeMode): void {
+    themeMode = next
+    theme.mode = next
+  }
+
+  function cancel(): void {
+    theme.mode = initialTheme
+    onclose()
+  }
+
+  async function submit(event: SubmitEvent): Promise<void> {
+    event.preventDefault()
+    saving = true
+    error = null
+    try {
+      await onsave(
+        config.Config.createFrom({
+          baseUrl,
+          apiKey,
+          chatModel,
+          titleModel,
+          systemPrompt,
+          contextWindow: contextWindow && contextWindow > 0 ? Math.floor(contextWindow) : 0,
+          temperature: temperature ?? undefined,
+          topP: topP ?? undefined,
+          maxTokens: maxTokens ?? undefined,
+          frequencyPenalty: frequencyPenalty ?? undefined,
+          braveApiKey,
+          ollamaApiKey,
+          parallelApiKey,
+          searchProvider,
+          webToolsEnabled: webSearch,
+          theme: themeMode
+        })
+      )
+      onclose()
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err)
+    } finally {
+      saving = false
+    }
+  }
+
+  function handleWindowKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape' && !event.defaultPrevented) {
+      event.preventDefault()
+      cancel()
+    }
+  }
+</script>
+
+<svelte:window onkeydown={handleWindowKeydown} />
+
+<div class="flex h-full w-full">
+  <aside class="flex w-52 shrink-0 flex-col gap-0.5 border-r border-line bg-panel p-2">
+    <button
+      type="button"
+      class="mb-1 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-muted transition-colors hover:bg-surface hover:text-fg"
+      title="Back to chats (Esc)"
+      onclick={cancel}
+    >
+      <ArrowLeft size={14} />
+      Back
+    </button>
+    <p class="px-2 pb-2 pt-1 text-xs font-semibold text-muted">Settings</p>
+    {#each sections as item (item.id)}
+      <button
+        type="button"
+        class="rounded-md px-2 py-1.5 text-left text-sm transition-colors {section ===
+        item.id
+          ? 'bg-surface font-medium text-fg shadow-sm'
+          : 'text-muted hover:text-fg'}"
+        onclick={() => (section = item.id)}
+      >
+        {item.label}
+      </button>
+    {/each}
+  </aside>
+
+  <form class="flex min-w-0 flex-1 flex-col" onsubmit={submit}>
+    <div class="border-b border-line px-6 py-3">
+      <h2 class="text-sm font-semibold">{sectionTitle}</h2>
+    </div>
+
+    <div class="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+      {#if section === 'appearance'}
+        <div class="mx-auto w-full max-w-2xl space-y-3">
+          <p class="text-xs text-muted">Theme</p>
+          <div class="grid grid-cols-3 gap-2">
+            {#each themeOptions as option (option.id)}
+              {@const Icon = option.icon}
+              <button
+                type="button"
+                aria-pressed={themeMode === option.id}
+                class="flex flex-col items-center gap-1.5 rounded-md border px-2 py-4 text-xs transition-colors {themeMode ===
+                option.id
+                  ? 'border-accent bg-panel text-fg'
+                  : 'border-line text-muted hover:text-fg'}"
+                onclick={() => selectTheme(option.id)}
+              >
+                <Icon size={16} />
+                {option.label}
+              </button>
+            {/each}
+          </div>
+          <p class="text-[11px] text-muted">
+            System follows the macOS appearance. Changes preview immediately; Cancel restores the
+            saved theme.
+          </p>
+        </div>
+      {:else if section === 'chat'}
+        <div class="mx-auto w-full max-w-2xl space-y-3">
+          <label class="block space-y-1">
+            <span class="text-xs text-muted">System prompt</span>
+            <textarea
+              bind:value={systemPrompt}
+              rows="3"
+              class="w-full resize-none rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+              placeholder="Optional instructions for the assistant"
+            ></textarea>
+          </label>
+
+          <label class="block space-y-1">
+            <span class="text-xs text-muted">Context window (tokens)</span>
+            <input
+              bind:value={contextWindow}
+              type="number"
+              min="1"
+              step="1"
+              class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+              placeholder="128000"
+            />
+            <span class="text-[11px] text-muted">
+              Used for the context warning. Chats can override it.
+            </span>
+          </label>
+
+          <p class="pt-1 text-xs text-muted">Generation defaults</p>
+          <div class="grid grid-cols-2 gap-3">
+            <label class="block space-y-1">
+              <span class="text-xs text-muted">Temperature</span>
+              <input
+                bind:value={temperature}
+                type="number"
+                min="0"
+                max="2"
+                step="0.1"
+                class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+                placeholder="Provider default"
+              />
+            </label>
+            <label class="block space-y-1">
+              <span class="text-xs text-muted">Top P</span>
+              <input
+                bind:value={topP}
+                type="number"
+                min="0.01"
+                max="1"
+                step="0.05"
+                class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+                placeholder="Provider default"
+              />
+            </label>
+            <label class="block space-y-1">
+              <span class="text-xs text-muted">Max output tokens</span>
+              <input
+                bind:value={maxTokens}
+                type="number"
+                min="1"
+                step="1"
+                class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+                placeholder="Provider default"
+              />
+            </label>
+            <label class="block space-y-1">
+              <span class="text-xs text-muted">Frequency penalty</span>
+              <input
+                bind:value={frequencyPenalty}
+                type="number"
+                min="-2"
+                max="2"
+                step="0.1"
+                class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+                placeholder="Provider default"
+              />
+            </label>
+          </div>
+          <p class="text-[11px] text-muted">
+            Copied into new chats. Existing chats keep their settings; clear a value in chat
+            settings to use the provider default.
+          </p>
+        </div>
+      {:else if section === 'provider'}
+        <div class="mx-auto w-full max-w-2xl space-y-3">
+          <label class="block space-y-1">
+            <span class="text-xs text-muted">Base URL</span>
+            <input
+              bind:value={baseUrl}
+              class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+              placeholder="https://api.openai.com/v1"
+              required
+            />
+            {#if insecureUrl}
+              <span class="block text-[11px] text-amber-500">
+                Not encrypted: the API key and chats are sent in plain text.
+              </span>
+            {/if}
+          </label>
+
+          <label class="block space-y-1">
+            <span class="text-xs text-muted">API key</span>
+            <input
+              bind:value={apiKey}
+              type="password"
+              class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+              placeholder="sk-…"
+            />
+          </label>
+
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              class="rounded-md border border-line px-2 py-1 text-xs text-muted transition-colors hover:text-fg disabled:opacity-40"
+              disabled={testing || !baseUrl.trim()}
+              onclick={() => void testConnection()}
+            >
+              {testing ? 'Testing…' : 'Test Connection'}
+            </button>
+            {#if testResult}
+              <span
+                role="status"
+                aria-live="polite"
+                class="min-w-0 flex-1 truncate text-xs {testResult.ok
+                  ? 'text-emerald-500'
+                  : 'text-red-500'}"
+                title={testResult.message}
+              >
+                {testResult.message}
+              </span>
+            {/if}
+          </div>
+
+          {#if baseUrl.trim()}
+            <div class="flex items-center justify-between">
+              <span class="text-xs text-muted">Models</span>
+              <button
+                type="button"
+                class="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted hover:text-fg disabled:opacity-40"
+                onclick={() => void loadModels()}
+                disabled={modelsLoading}
+              >
+                <RefreshCw size={12} class={modelsLoading ? 'animate-spin' : ''} />
+                Refresh
+              </button>
+            </div>
+
+            <p
+              role="status"
+              aria-live="polite"
+              class="text-[11px] {modelsStatus.tone === 'ok'
+                ? 'text-emerald-500'
+                : modelsStatus.tone === 'error'
+                  ? 'text-amber-500'
+                  : 'text-muted'}"
+            >
+              {modelsStatus.text}
+            </p>
+
+            <label class="block space-y-1">
+              <span class="text-xs text-muted">Chat model</span>
+              {#if models.length > 0}
+                <ModelCombobox
+                  bind:value={chatModel}
+                  options={modelOptions}
+                  placeholder="Select a chat model"
+                />
+              {:else}
+                <input
+                  bind:value={chatModel}
+                  class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+                  placeholder="gpt-4o-mini"
+                />
+              {/if}
+            </label>
+
+            {#if chatModel.trim()}
+              <label class="block space-y-1">
+                <span class="text-xs text-muted">Title model</span>
+                {#if models.length > 0}
+                  <ModelCombobox
+                    bind:value={titleModel}
+                    options={titleOptions}
+                    placeholder="Same as chat model"
+                    allowEmpty
+                    emptyLabel="Same as chat model"
+                  />
+                {:else}
+                  <input
+                    bind:value={titleModel}
+                    class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+                    placeholder="Same as chat model"
+                  />
+                {/if}
+                <span class="text-[11px] text-muted">Leave empty to use the chat model.</span>
+              </label>
+            {/if}
+          {:else}
+            <p class="text-[11px] text-muted">
+              Set a base URL to load models and choose a chat model.
+            </p>
+          {/if}
+        </div>
+      {:else}
+        <div class="mx-auto w-full max-w-2xl space-y-3">
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-xs text-muted">Web search</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={webSearch}
+              aria-label="Web search"
+              onclick={() => (webSearch = !webSearch)}
+              class="relative h-5 w-9 shrink-0 rounded-full transition-colors {webSearch
+                ? 'bg-accent'
+                : 'bg-line'}"
+            >
+              <span
+                class="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition-transform {webSearch
+                  ? 'translate-x-4'
+                  : 'translate-x-0'}"
+              ></span>
+            </button>
+          </div>
+          <p class="text-[11px] text-muted">
+            Off by default. Turning it on starts new chats with web search on; each chat can still
+            turn it off. The chat model must support tool calling.
+          </p>
+
+          {#if webSearch}
+            <label class="block space-y-1">
+              <span class="text-xs text-muted">Search provider</span>
+              <select
+                bind:value={searchProvider}
+                class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+              >
+                <option value="parallel">Parallel (no API key)</option>
+                <option value="brave">Brave Search</option>
+                <option value="ollama">Ollama</option>
+              </select>
+            </label>
+
+            {#if searchProvider === 'parallel'}
+              <label class="block space-y-1">
+                <span class="text-xs text-muted">Parallel API key (optional)</span>
+                <input
+                  bind:value={parallelApiKey}
+                  type="password"
+                  class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+                  placeholder="Optional"
+                />
+                <span class="text-[11px] text-muted">
+                  Without a key, search and fetch use Parallel's free tier at lower rate limits.
+                  Queries and fetched URLs are sent to mcp.parallel.ai. A key raises the limits and
+                  bills that Parallel account.
+                </span>
+              </label>
+            {:else if searchProvider === 'brave'}
+              <label class="block space-y-1">
+                <span class="text-xs text-muted">Brave Search API key</span>
+                <input
+                  bind:value={braveApiKey}
+                  type="password"
+                  class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+                  placeholder="Required"
+                />
+                <span class="text-[11px] text-muted">
+                  Queries are sent to api.search.brave.com. The chat model must support tool
+                  calling.
+                </span>
+              </label>
+            {:else}
+              <label class="block space-y-1">
+                <span class="text-xs text-muted">Ollama API key</span>
+                <input
+                  bind:value={ollamaApiKey}
+                  type="password"
+                  class="w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+                  placeholder="Required"
+                />
+                <span class="text-[11px] text-muted">
+                  Queries and fetched URLs are sent to ollama.com. The chat model must support tool
+                  calling.
+                </span>
+              </label>
+            {/if}
+          {/if}
+
+          {#if !webSearch}
+            <p class="text-[11px] text-muted">
+              Web search is off. Saved keys are kept; turn web search on to edit them.
+            </p>
+          {/if}
+        </div>
+      {/if}
+    </div>
+
+    <div class="flex items-center justify-between gap-3 border-t border-line px-6 py-3">
+      <p class="min-w-0 truncate text-xs text-red-500">{error ?? ''}</p>
+      <div class="flex shrink-0 gap-2">
+        <button
+          type="button"
+          class="rounded-md px-3 py-1.5 text-sm text-muted hover:text-fg"
+          onclick={cancel}
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          class="rounded-md bg-accent px-3 py-1.5 text-sm text-white disabled:opacity-40"
+          disabled={saving}
+        >
+          Save
+        </button>
+      </div>
+    </div>
+  </form>
+</div>
